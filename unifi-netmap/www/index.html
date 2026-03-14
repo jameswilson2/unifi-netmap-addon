@@ -370,15 +370,16 @@
 
 <script>
 // ─── INGRESS BASE PATH ───────────────────────────────────────────────────────
-// When running as a HA add-on the Supervisor exposes the app under a dynamic
-// path like /api/hassio_ingress/<token>/.  We fetch our own /ingress-path
-// endpoint (served by server.py) to discover it, then prefix every API call.
+// When running as a HA add-on the page is served under a dynamic ingress path
+// like /api/hassio_ingress/<token>/. We derive BASE from window.location so
+// all fetch calls are correctly prefixed — no server round-trip needed.
 let BASE = '';
 async function resolveBase() {
-  try {
-    const r = await fetch('/ingress-path');
-    if (r.ok) BASE = (await r.text()).trim().replace(/\/$/, '');
-  } catch (_) { /* running outside HA – BASE stays '' */ }
+  const path = window.location.pathname;
+  // Strip trailing slash and any filename, keep the directory prefix
+  // e.g. /api/hassio_ingress/abc123/  →  /api/hassio_ingress/abc123
+  BASE = path.replace(/\/[^/]*$/, '').replace(/\/$/, '');
+  console.log('Ingress BASE:', BASE);
 }
 
 // ─── STATE ───────────────────────────────────────────────────────────────────

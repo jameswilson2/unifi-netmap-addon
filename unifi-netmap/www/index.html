@@ -27,6 +27,50 @@
     --theme-toggle-icon: #cdd9e5;
   }
 
+  /* ── Dark theme (default) ── */
+  :root {
+    --bg: #0a0e14;
+    --surface: #111820;
+    --surface2: #161e28;
+    --border: #1e2d3d;
+    --accent: #00d4aa;
+    --accent2: #0ea5e9;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --text: #cdd9e5;
+    --text-dim: #6b7f8f;
+    --node-bg: #131c27;
+    --node-border: #1e3048;
+    --line: #1a3a52;
+    --line-active: #00d4aa;
+    --line-internet: #7c3aed;
+    --theme-toggle-bg: #1e2d3d;
+    --theme-toggle-icon: #cdd9e5;
+  }
+
+  /* ── Light theme — OS preference OR manual .light class ── */
+  @media (prefers-color-scheme: light) {
+    :root:not(.dark) {
+      --bg: #f0f4f8;
+      --surface: #ffffff;
+      --surface2: #e8eef5;
+      --border: #c8d8e8;
+      --accent: #00a882;
+      --accent2: #0284c7;
+      --warn: #d97706;
+      --danger: #dc2626;
+      --text: #1a2a3a;
+      --text-dim: #5a7290;
+      --node-bg: #ffffff;
+      --node-border: #b8cfe0;
+      --line: #b0c8e0;
+      --line-active: #00a882;
+      --line-internet: #6d28d9;
+      --theme-toggle-bg: #e2eaf2;
+      --theme-toggle-icon: #1a2a3a;
+    }
+  }
+
   :root.light {
     --bg: #f0f4f8;
     --surface: #ffffff;
@@ -143,43 +187,87 @@
   }
 
   /* Light theme node overrides */
-  :root.light .node {
-    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  @media (prefers-color-scheme: light) {
+    :root:not(.dark) .node { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+    :root:not(.dark) .node:hover { box-shadow: 0 4px 20px rgba(0,168,130,0.18); }
+    :root:not(.dark) .node.internet-node { background: #f5f0ff; border-color: #ddd0f8; }
+    :root:not(.dark) .node.internet-node:hover { border-color: #6d28d9; box-shadow: 0 4px 20px rgba(109,40,217,0.15); }
+    :root:not(.dark) .node.gateway { border-color: #b0cfe8; }
+    :root:not(.dark) .np.used { background: #d0f0e8; }
+    :root:not(.dark) .np.used::after { background: var(--accent); }
+    :root:not(.dark) .np.uplink { background: #cce4f6; }
+    :root:not(.dark) .np.uplink::after { background: var(--accent2); }
+    :root:not(.dark) .detail-panel { box-shadow: 0 8px 32px rgba(0,0,0,0.12); }
+    :root:not(.dark) .minimap { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+    :root:not(.dark) .port.active { background: var(--accent); }
+    :root:not(.dark) .port.uplink { background: var(--accent2); }
   }
-  :root.light .node:hover {
-    box-shadow: 0 4px 20px rgba(0,168,130,0.18);
-  }
-  :root.light .node.internet-node {
-    background: #f5f0ff;
-    border-color: #ddd0f8;
-  }
-  :root.light .node.internet-node:hover {
-    border-color: #6d28d9;
-    box-shadow: 0 4px 20px rgba(109,40,217,0.15);
-  }
-  :root.light .node.gateway {
-    border-color: #b0cfe8;
-  }
-  :root.light .np.used {
-    background: #d0f0e8;
-  }
-  :root.light .np.used::after {
-    background: var(--accent);
-  }
-  :root.light .np.uplink {
-    background: #cce4f6;
-  }
-  :root.light .np.uplink::after {
-    background: var(--accent2);
-  }
-  :root.light .detail-panel {
-    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
-  }
-  :root.light .minimap {
-    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  }
+  :root.light .node { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+  :root.light .node:hover { box-shadow: 0 4px 20px rgba(0,168,130,0.18); }
+  :root.light .node.internet-node { background: #f5f0ff; border-color: #ddd0f8; }
+  :root.light .node.internet-node:hover { border-color: #6d28d9; box-shadow: 0 4px 20px rgba(109,40,217,0.15); }
+  :root.light .node.gateway { border-color: #b0cfe8; }
+  :root.light .np.used { background: #d0f0e8; }
+  :root.light .np.used::after { background: var(--accent); }
+  :root.light .np.uplink { background: #cce4f6; }
+  :root.light .np.uplink::after { background: var(--accent2); }
+  :root.light .detail-panel { box-shadow: 0 8px 32px rgba(0,0,0,0.12); }
+  :root.light .minimap { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
   :root.light .port.active { background: var(--accent); }
   :root.light .port.uplink { background: var(--accent2); }
+
+  /* ── RESPONSIVE ─────────────────────────────────────────────────────────── */
+  .sidebar-toggle {
+    display: none;
+    width: 32px; height: 32px;
+    background: var(--theme-toggle-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    align-items: center; justify-content: center;
+    cursor: pointer;
+    color: var(--theme-toggle-icon);
+    font-size: 16px;
+    flex-shrink: 0;
+    transition: all 0.2s;
+  }
+  .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Tablet: narrow sidebar */
+  @media (max-width: 900px) {
+    .topbar-title { display: none; }
+    .topbar-sep   { display: none; }
+    .sidebar { width: 200px; }
+    .canvas-wrap { left: 200px; }
+    .minimap { left: 216px; }
+  }
+
+  /* Mobile: sidebar becomes a slide-over drawer */
+  @media (max-width: 600px) {
+    .sidebar-toggle { display: flex; }
+    .sidebar {
+      left: -260px;
+      width: 260px;
+      transition: left 0.25s ease;
+      z-index: 200;
+      box-shadow: none;
+    }
+    .sidebar.open {
+      left: 0;
+      box-shadow: 4px 0 24px rgba(0,0,0,0.4);
+    }
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 190;
+    }
+    .sidebar-backdrop.show { display: block; }
+    .canvas-wrap { left: 0; }
+    .minimap { left: 16px; }
+    .detail-panel { left: 16px; right: 16px; width: auto; }
+    .controls { bottom: 16px; right: 16px; }
+  }
 
   /* CANVAS AREA */
   .canvas-wrap {
@@ -326,6 +414,7 @@
 
 <!-- TOP BAR -->
 <div class="topbar">
+  <div class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">☰</div>
   <div class="topbar-logo">◈ UNIFI NETMAP</div>
   <div class="topbar-sep"></div>
   <div class="topbar-title">Network Topology by James Wilson</div>
@@ -340,6 +429,9 @@
 <div class="sidebar" id="sidebar">
   <div class="sidebar-section">Devices</div>
 </div>
+
+<!-- SIDEBAR BACKDROP (mobile) -->
+<div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar()"></div>
 
 <!-- CANVAS -->
 <div class="canvas-wrap" id="canvasWrap">
@@ -764,7 +856,7 @@ function drawMinimap() {
   const c = document.getElementById('minimapCanvas');
   const ctx = c.getContext('2d');
   ctx.clearRect(0, 0, 140, 90);
-  ctx.fillStyle = document.documentElement.classList.contains('light') ? '#f0f4f8' : '#0a0e14';
+  ctx.fillStyle = isEffectivelyLight() ? '#f0f4f8' : '#0a0e14';
   ctx.fillRect(0, 0, 140, 90);
 
   const scaleX = 90 / 1200;
@@ -942,23 +1034,106 @@ function parseUniFiDevices(listData, statsData) {
 }
 
 // ─── THEME TOGGLE ────────────────────────────────────────────────────────────
+function isEffectivelyLight() {
+  const root = document.documentElement;
+  if (root.classList.contains('light')) return true;
+  if (root.classList.contains('dark'))  return false;
+  return window.matchMedia('(prefers-color-scheme: light)').matches;
+}
+
+function applyThemeButton() {
+  document.getElementById('themeToggle').textContent = isEffectivelyLight() ? '☾' : '☀';
+}
+
 function toggleTheme() {
   const root = document.documentElement;
-  const btn  = document.getElementById('themeToggle');
-  const isLight = root.classList.toggle('light');
-  btn.textContent = isLight ? '☾' : '☀';
-  localStorage.setItem('unifi-theme', isLight ? 'light' : 'dark');
+  const osLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+  const currentlyLight = isEffectivelyLight();
+  // Toggle to opposite of current state, but only set a class if it differs from OS
+  root.classList.remove('light', 'dark');
+  if (currentlyLight) {
+    // Switch to dark — if OS is dark we need no class, if OS is light we need .dark
+    if (!osLight) { /* OS is already dark, just remove classes */ }
+    else root.classList.add('dark');
+    localStorage.setItem('unifi-theme', 'dark');
+  } else {
+    // Switch to light — if OS is light we need no class, if OS is dark we need .light
+    if (osLight) { /* OS is already light, just remove classes */ }
+    else root.classList.add('light');
+    localStorage.setItem('unifi-theme', 'light');
+  }
+  applyThemeButton();
   drawMinimap();
 }
 
-// Restore saved theme on load
+// Restore saved theme preference on load, then listen for OS changes
 (function () {
   const saved = localStorage.getItem('unifi-theme');
-  if (saved === 'light') {
-    document.documentElement.classList.add('light');
-    document.getElementById('themeToggle').textContent = '☾';
-  }
+  const root  = document.documentElement;
+  if (saved === 'light') root.classList.add('light');
+  else if (saved === 'dark') root.classList.add('dark');
+  applyThemeButton();
+  // Live-update if user changes OS theme and has no manual override
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (!localStorage.getItem('unifi-theme')) {
+      applyThemeButton();
+      drawMinimap();
+    }
+  });
 })();
+
+// ─── SIDEBAR TOGGLE (mobile) ─────────────────────────────────────────────────
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebarBackdrop');
+  const open = sb.classList.toggle('open');
+  bd.classList.toggle('show', open);
+}
+
+// Close sidebar when a device row is tapped on mobile
+document.getElementById('sidebar').addEventListener('click', () => {
+  if (window.innerWidth <= 600) toggleSidebar();
+});
+
+// ─── TOUCH SUPPORT ───────────────────────────────────────────────────────────
+let lastTouchDist = null;
+const canvasWrapEl = document.getElementById('canvasWrap');
+
+canvasWrapEl.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2) {
+    lastTouchDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+  } else if (e.touches.length === 1) {
+    isPanning = true;
+    panStartX = e.touches[0].clientX;
+    panStartY = e.touches[0].clientY;
+    panOriginX = panX;
+    panOriginY = panY;
+  }
+}, { passive: true });
+
+canvasWrapEl.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 2) {
+    const dist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    if (lastTouchDist) zoom(dist / lastTouchDist);
+    lastTouchDist = dist;
+  } else if (e.touches.length === 1 && isPanning) {
+    panX = panOriginX + (e.touches[0].clientX - panStartX);
+    panY = panOriginY + (e.touches[0].clientY - panStartY);
+    applyTransform();
+    drawMinimap();
+  }
+}, { passive: true });
+
+canvasWrapEl.addEventListener('touchend', () => {
+  lastTouchDist = null;
+  isPanning = false;
+}, { passive: true });
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 drawMinimap();

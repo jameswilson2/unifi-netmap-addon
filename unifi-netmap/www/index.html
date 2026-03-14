@@ -413,8 +413,8 @@
   @media (max-width: 600px) {
     /* Hide zoom controls — pinch to zoom works instead */
     .controls { display: none; }
-    /* Move minimap to bottom-left, clear of everything */
-    .minimap { left: 16px; bottom: 16px; z-index: 49; }
+    /* Hide minimap — not useful on small screens */
+    .minimap { display: none; }
   }
 </style>
 </head>
@@ -1150,11 +1150,17 @@ canvasWrapEl.addEventListener('touchend', () => {
 // ─── REALTIME WEBSOCKET ──────────────────────────────────────────────────────
 let ws = null;
 let wsReconnectTimer = null;
+let wsFallbackTimer = null;
+
+function scheduleRefresh() {
+  // Debounce — don't hammer the API if many events arrive at once
+  clearTimeout(wsFallbackTimer);
+  wsFallbackTimer = setTimeout(() => fetchFromAPI(), 300);
+}
 
 function connectWebSocket() {
   if (ws) ws.close();
 
-  // Build the WebSocket URL — same host as the page, swap http→ws, add ingress prefix
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${proto}//${window.location.host}${BASE}/unifi-ws`;
   console.log('WS connecting:', wsUrl);
@@ -1167,15 +1173,19 @@ function connectWebSocket() {
   };
 
   ws.onmessage = (evt) => {
+    // Log raw message so we can see what UniFi actually sends
+    console.log('WS message:', evt.data.slice(0, 200));
     try {
       const msg = JSON.parse(evt.data);
-      // UniFi pushes events like { meta: { message: 'device:update' }, data: [...] }
-      const type = msg?.meta?.message || '';
-      if (type.startsWith('device') || type === 'speed-test:update') {
-        // Re-fetch full state on any device event
-        fetchFromAPI();
+      const type = msg?.meta?.message || msg?.meta?.type || '';
+      // Trigger on any device/client/network event — cast wide net
+      if (type || msg?.data) {
+        scheduleRefresh();
       }
-    } catch (_) {}
+    } catch (_) {
+      // Non-JSON frame — still trigger a refresh
+      scheduleRefresh();
+    }
   };
 
   ws.onclose = () => {
@@ -1189,8 +1199,11 @@ function connectWebSocket() {
   };
 }
 
+// 30s fallback poll — catches anything the WS misses
+setInterval(() => fetchFromAPI(), 30000);
+
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-drawMinimap();
+if (window.innerWidth > 600) drawMinimap();
 resolveBase().then(() => {
   fetchFromAPI().then(() => {
     connectWebSocket();

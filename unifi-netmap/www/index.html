@@ -263,10 +263,9 @@
       z-index: 190;
     }
     .sidebar-backdrop.show { display: block; }
+    /* Canvas fills full width — sidebar is an overlay */
     .canvas-wrap { left: 0; }
-    .minimap { left: 16px; }
     .detail-panel { left: 16px; right: 16px; width: auto; }
-    .controls { bottom: 16px; right: 16px; }
   }
 
   /* CANVAS AREA */
@@ -405,8 +404,15 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     overflow: hidden;
-    z-index: 50;
+    z-index: 49;
     opacity: 0.8;
+  }
+
+  @media (max-width: 600px) {
+    /* Hide zoom controls — pinch to zoom works instead */
+    .controls { display: none; }
+    /* Move minimap to bottom-left, clear of everything */
+    .minimap { left: 16px; bottom: 16px; z-index: 49; }
   }
 </style>
 </head>
@@ -843,10 +849,14 @@ function highlightSidebar(id) {
   if (row) row.classList.add('active');
 }
 
+function sidebarWidth() {
+  return window.innerWidth <= 600 ? 0 : (window.innerWidth <= 900 ? 200 : 260);
+}
+
 function focusNode(id) {
   const d = id === 'internet' ? internetNode : devices.find(x => x.id === id);
   if (!d) return;
-  panX = -d.x * scale + (window.innerWidth - 260) / 2 - NODE_W / 2;
+  panX = -d.x * scale + (window.innerWidth - sidebarWidth()) / 2 - NODE_W / 2;
   panY = -d.y * scale + (window.innerHeight - 48) / 2;
   applyTransform();
 }

@@ -83,7 +83,7 @@
   .topbar-title { color: var(--text-dim); font-size: 12px; }
   .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
-  .status-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
+  .status-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
 
   /* SIDEBAR */
   .sidebar {
@@ -843,7 +843,10 @@ async function fetchFromAPI() {
     document.getElementById('statusDot').style.boxShadow = '0 0 6px var(--accent)';
   } catch (err) {
     console.error('API failed:', err);
-    document.getElementById('statusLabel').textContent = 'ERROR';
+    // Try to get more detail — read response body if available
+    const msg = err.message || String(err);
+    document.getElementById('statusLabel').textContent = `ERROR: ${msg}`;
+    document.getElementById('statusLabel').title = msg;
     document.getElementById('statusDot').style.background = 'var(--danger)';
     document.getElementById('statusDot').style.boxShadow = 'none';
   }

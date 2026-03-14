@@ -711,8 +711,8 @@ function layoutDevices(devs) {
     });
   }
 
-  // Start layout: internet node centered, router beneath it
-  const canvasCenterX = 950;
+  // Start layout: internet node centered on viewport, router beneath it
+  const canvasCenterX = (window.innerWidth - sidebarWidth()) / 2 / 0.8;
   internetNode.x = canvasCenterX - NODE_W / 2;
   internetNode.y = 20;
 
@@ -1147,16 +1147,54 @@ canvasWrapEl.addEventListener('touchend', () => {
   isPanning = false;
 }, { passive: true });
 
+// ─── REALTIME WEBSOCKET ──────────────────────────────────────────────────────
+let ws = null;
+let wsReconnectTimer = null;
+
+function connectWebSocket() {
+  if (ws) ws.close();
+
+  // Build the WebSocket URL — same host as the page, swap http→ws, add ingress prefix
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${proto}//${window.location.host}${BASE}/unifi-ws`;
+  console.log('WS connecting:', wsUrl);
+
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    console.log('WS connected');
+    clearTimeout(wsReconnectTimer);
+  };
+
+  ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      // UniFi pushes events like { meta: { message: 'device:update' }, data: [...] }
+      const type = msg?.meta?.message || '';
+      if (type.startsWith('device') || type === 'speed-test:update') {
+        // Re-fetch full state on any device event
+        fetchFromAPI();
+      }
+    } catch (_) {}
+  };
+
+  ws.onclose = () => {
+    console.log('WS closed — reconnecting in 5s');
+    wsReconnectTimer = setTimeout(connectWebSocket, 5000);
+  };
+
+  ws.onerror = (e) => {
+    console.warn('WS error', e);
+    ws.close();
+  };
+}
+
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 drawMinimap();
 resolveBase().then(() => {
-  fetchFromAPI();
-  // Auto-refresh every 5s
-  setInterval(() => {
-    if (document.getElementById('statusLabel').textContent === 'LIVE') {
-      fetchFromAPI();
-    }
-  }, 5000);
+  fetchFromAPI().then(() => {
+    connectWebSocket();
+  });
 });
 </script>
 </body>

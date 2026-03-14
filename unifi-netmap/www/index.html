@@ -232,6 +232,13 @@
   }
   .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
+  /* CANVAS AREA — base rule before media queries so overrides work */
+  .canvas-wrap {
+    position: fixed;
+    top: 48px; left: 260px; right: 0; bottom: 0;
+    overflow: hidden;
+  }
+
   /* Tablet: narrow sidebar */
   @media (max-width: 900px) {
     .topbar-title { display: none; }
@@ -268,12 +275,7 @@
     .detail-panel { left: 16px; right: 16px; width: auto; }
   }
 
-  /* CANVAS AREA */
-  .canvas-wrap {
-    position: fixed;
-    top: 48px; left: 260px; right: 0; bottom: 0;
-    overflow: hidden;
-  }
+  /* CANVAS AREA (duplicate removed — moved above) */
 
   #canvas {
     position: absolute;

@@ -1,5 +1,5 @@
 name: "UniFi Network Map"
-version: "1.0.4"
+version: "1.0.6"
 slug: "unifi_netmap"
 description: "Live UniFi network topology map with dark/light theme, hosted on your HA server."
 url: "https://github.com/your-username/unifi-netmap-addon"
@@ -15,7 +15,7 @@ boot: auto
 host_network: true
 
 ingress: true
-ingress_port: 8099
+ingress_port: 8765
 ingress_stream: false
 panel_icon: mdi:lan
 panel_title: "Network Map"
@@ -29,6 +29,6 @@ schema:
   api_key: str
 
 ports:
-  8099/tcp: null
+  8765/tcp: null
 
 map: []

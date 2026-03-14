@@ -14,7 +14,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 UNIFI_HOST   = os.environ.get("UNIFI_HOST", "https://192.168.4.1")
 API_KEY      = os.environ.get("API_KEY", "")
-PORT         = 8099
+PORT         = 8765
 WWW_DIR      = "/www"
 # HA sets X-Ingress-Path on every request so the app knows its base path.
 # We also expose it at /ingress-path for the JS to read on first load.
@@ -37,6 +37,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         ingress = self._ingress_path()
+        print(f"← GET raw path: {self.path!r}  ingress prefix: {ingress!r}", flush=True)
 
         # ── /ingress-path endpoint: tells the JS its base URL ──────────
         if self.path.rstrip("/") in ("/ingress-path", ingress + "/ingress-path"):
@@ -107,7 +108,10 @@ class Handler(SimpleHTTPRequestHandler):
         print(fmt % args)
 
 
+class ReusableHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
 print(f"Starting UniFi Network Map on port {PORT}")
 print(f"Forwarding /unifi/* → {UNIFI_HOST}")
 print(f"Ingress entry: {INGRESS_ENTRY}")
-HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+ReusableHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

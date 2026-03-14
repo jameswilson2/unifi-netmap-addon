@@ -1,20 +1,15 @@
-#!/usr/bin/with-contenv bashio
+#!/bin/sh
 
-# Read user configuration from HA options
-UNIFI_HOST=$(bashio::config 'unifi_host')
-API_KEY=$(bashio::config 'api_key')
+OPTIONS=/data/options.json
 
-bashio::log.info "Starting UniFi Network Map..."
-bashio::log.info "UniFi host: ${UNIFI_HOST}"
+# Parse options.json with Python (already installed)
+UNIFI_HOST=$(python3 -c "import json; d=json.load(open('$OPTIONS')); print(d.get('unifi_host','https://192.168.4.1'))")
+API_KEY=$(python3 -c "import json; d=json.load(open('$OPTIONS')); print(d.get('api_key',''))")
 
-# Export for the Python server
-export UNIFI_HOST="${UNIFI_HOST}"
-export API_KEY="${API_KEY}"
+export UNIFI_HOST
+export API_KEY
 
-# Get the ingress entry path assigned by HA Supervisor
-INGRESS_ENTRY=$(bashio::addon.ingress_entry)
-export INGRESS_ENTRY="${INGRESS_ENTRY}"
-
-bashio::log.info "Ingress path: ${INGRESS_ENTRY}"
+echo "Starting UniFi Network Map..."
+echo "UniFi host: ${UNIFI_HOST}"
 
 exec python3 /server.py

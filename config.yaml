@@ -1,0 +1,33 @@
+name: "UniFi Network Map"
+version: "1.0.0"
+slug: "unifi_netmap"
+description: "Live UniFi network topology map with dark/light theme, hosted on your HA server."
+url: "https://github.com/your-username/unifi-netmap-addon"
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+
+startup: application
+boot: auto
+
+ingress: true
+ingress_port: 8099
+ingress_stream: false
+panel_icon: mdi:lan
+panel_title: "Network Map"
+
+options:
+  unifi_host: "https://192.168.4.1"
+  api_key: ""
+
+schema:
+  unifi_host: str
+  api_key: str
+
+ports:
+  8099/tcp: null
+
+map: []

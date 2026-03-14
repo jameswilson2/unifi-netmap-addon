@@ -68,7 +68,7 @@ class Handler(SimpleHTTPRequestHandler):
     def _proxy_unifi(self):
         api_path = self.path[len("/unifi"):]   # /unifi/proxy/... → /proxy/...
         url = UNIFI_HOST + api_path
-        print(f"→ Proxying: {url}")
+        print(f"→ Proxying: {url}", flush=True)
         req = urllib.request.Request(url, headers={
             "X-API-KEY": API_KEY,
             "Accept": "application/json",
@@ -76,7 +76,7 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             resp = urllib.request.urlopen(req, context=ctx)
             body = resp.read()
-            print(f"← {resp.status} ({len(body)} bytes)")
+            print(f"← {resp.status} ({len(body)} bytes)", flush=True)
             self.send_response(resp.status)
             for k, v in resp.headers.items():
                 if k.lower() not in ("transfer-encoding", "content-encoding"):
@@ -87,14 +87,16 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
         except urllib.error.HTTPError as e:
             body = e.read()
-            print(f"← HTTPError {e.code}: {body}")
+            print(f"← HTTPError {e.code} for {url}", flush=True)
+            print(f"   Response body: {body[:500]}", flush=True)
+            print(f"   Request headers: X-API-KEY={'SET' if API_KEY else 'MISSING'}", flush=True)
             self.send_response(e.code)
             self.send_header("Content-Type", "application/json")
             self._cors()
             self.end_headers()
             self.wfile.write(body)
         except Exception:
-            print(f"← Exception: {traceback.format_exc()}")
+            print(f"← Exception for {url}: {traceback.format_exc()}", flush=True)
             self.send_response(500)
             self.end_headers()
 

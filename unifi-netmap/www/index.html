@@ -943,7 +943,6 @@ async function fetchFromAPI() {
     return;
   }
   _fetchInFlight = true;
-  console.log('[fetchFromAPI] starting');
 
   document.getElementById('statusLabel').textContent = 'CONNECTING...';
   document.getElementById('statusDot').style.background = 'var(--warn)';
@@ -987,7 +986,6 @@ async function fetchFromAPI() {
     document.getElementById('statusDot').style.boxShadow = 'none';
   } finally {
     _fetchInFlight = false;
-    console.log('[fetchFromAPI] complete, _fetchInFlight cleared');
   }
 }
 
@@ -1192,7 +1190,6 @@ let topoDebounce = null;
 // Topology refresh: triggered by SSE events (device up/down, client join etc.)
 // Debounced so a burst of events causes only one re-fetch.
 function scheduleTopoRefresh() {
-  console.log('[SSE] scheduleTopoRefresh triggered');
   clearTimeout(topoDebounce);
   topoDebounce = setTimeout(() => fetchFromAPI(), 600);
 }
@@ -1209,7 +1206,6 @@ function connectSSE() {
 
   sse.onmessage = (evt) => {
     if (!evt.data) return;
-    console.log('[SSE] message received:', evt.data.slice(0, 120));
     try {
       const msg = JSON.parse(evt.data);
       const msgType = msg?.meta?.message || '';
@@ -1263,8 +1259,6 @@ function applyStatUpdate(statList) {
     const tx = s.tx != null ? `${s.tx} KB/s` : d.tx;
     const rx = s.rx != null ? `${s.rx} KB/s` : d.rx;
 
-    if (cpu === d.cpu && mem === d.mem && clients === d.clients) return;
-
     d.cpu = cpu; d.mem = mem; d.clients = clients;
     d.portsUsed = portsUsed; d.tx = tx; d.rx = rx;
 
@@ -1297,10 +1291,8 @@ let _cachedSiteId = null;
 
 let _pollInFlight = false;
 async function pollStats() {
-  if (!devices.length) { console.warn('[pollStats] no devices yet'); return; }
-  if (_pollInFlight) { console.warn('[pollStats] blocked by in-flight guard'); return; }
+  if (!devices.length || _pollInFlight) return;
   _pollInFlight = true;
-  console.log('[pollStats] starting');
   const abort = new AbortController();
   const abortTimer = setTimeout(() => {
     console.warn('[pollStats] fetch timed out after 8s — aborting');
@@ -1390,11 +1382,11 @@ async function pollStats() {
     }
   } finally {
     _pollInFlight = false;
-    console.log('[pollStats] complete');
   }
 }
 
-setInterval(pollStats, 60000);  // safety-net only — live stats come via SSE
+// pollStats disabled — live stats are pushed via SSE (stat-update events)
+// setInterval(pollStats, 60000);
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 if (window.innerWidth > 600) drawMinimap();

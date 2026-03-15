@@ -913,49 +913,56 @@ function drawMinimap() {
 }
 
 // ─── API FETCH ────────────────────────────────────────────────────────────────
+// Cached after first successful fetch — sites list never changes at runtime
+let _siteId = null;
+let _fetchInFlight = false;
+
 async function fetchFromAPI() {
+  if (_fetchInFlight) return;   // don't stack concurrent full refreshes
+  _fetchInFlight = true;
+
   document.getElementById('statusLabel').textContent = 'CONNECTING...';
   document.getElementById('statusDot').style.background = 'var(--warn)';
 
   try {
-    // Step 1: get site ID dynamically
-    const sitesRes = await fetch(`${BASE}/unifi/proxy/network/integration/v1/sites`, {
-      headers: { 'Accept': 'application/json' }
-    });
-    if (!sitesRes.ok) throw new Error(`Sites API: ${sitesRes.status}`);
-    const sitesData = await sitesRes.json();
-    const siteId = sitesData.data?.[0]?.id;
-    if (!siteId) throw new Error('No site found');
+    // Fetch site ID once and cache it for the session
+    if (!_siteId) {
+      const sitesRes = await fetch(`${BASE}/unifi/proxy/network/integration/v1/sites`, {
+        headers: { Accept: 'application/json' }
+      });
+      if (!sitesRes.ok) throw new Error(`Sites API: ${sitesRes.status}`);
+      const sitesData = await sitesRes.json();
+      _siteId = sitesData.data?.[0]?.id;
+      if (!_siteId) throw new Error('No site found');
+    }
 
-    // Step 2: fetch device list + full stats in parallel
+    // Fetch device list + full stats in parallel
     const [listRes, statsRes] = await Promise.all([
-      fetch(`${BASE}/unifi/proxy/network/integration/v1/sites/${siteId}/devices`, {
-        headers: { 'Accept': 'application/json' }
+      fetch(`${BASE}/unifi/proxy/network/integration/v1/sites/${_siteId}/devices`, {
+        headers: { Accept: 'application/json' }
       }),
       fetch(`${BASE}/unifi/proxy/network/api/s/default/stat/device`, {
-        headers: { 'Accept': 'application/json' }
+        headers: { Accept: 'application/json' }
       })
     ]);
 
     if (!listRes.ok) throw new Error(`List API: ${listRes.status}`);
     if (!statsRes.ok) throw new Error(`Stats API: ${statsRes.status}`);
 
-    const listData  = await listRes.json();
-    const statsData = await statsRes.json();
-
-    parseUniFiDevices(listData, statsData);
+    parseUniFiDevices(await listRes.json(), await statsRes.json());
 
     document.getElementById('statusLabel').textContent = 'LIVE';
     document.getElementById('statusDot').style.background = 'var(--accent)';
     document.getElementById('statusDot').style.boxShadow = '0 0 6px var(--accent)';
   } catch (err) {
     console.error('API failed:', err);
-    // Try to get more detail — read response body if available
     const msg = err.message || String(err);
     document.getElementById('statusLabel').textContent = `ERROR: ${msg}`;
     document.getElementById('statusLabel').title = msg;
     document.getElementById('statusDot').style.background = 'var(--danger)';
     document.getElementById('statusDot').style.boxShadow = 'none';
+  } finally {
+    _fetchInFlight = false;
   }
 }
 
@@ -1194,8 +1201,10 @@ function connectSSE() {
 // siteId is cached after first fetch — no need to re-fetch sites every 10s
 let _cachedSiteId = null;
 
+let _pollInFlight = false;
 async function pollStats() {
-  if (!devices.length) return;  // nothing to update yet
+  if (!devices.length || _pollInFlight) return;
+  _pollInFlight = true;
   try {
     // Fetch only the stats endpoint — site ID is stable and cached
     const statsRes = await fetch(`${BASE}/unifi/proxy/network/api/s/default/stat/device`, {
@@ -1253,6 +1262,8 @@ async function pollStats() {
     });
   } catch (e) {
     console.warn('Stat poll error:', e);
+  } finally {
+    _pollInFlight = false;
   }
 }
 

@@ -1208,6 +1208,17 @@ function connectSSE() {
   sse.onmessage = (evt) => {
     if (!evt.data) return;
     console.log('[SSE] message received:', evt.data.slice(0, 120));
+    try {
+      const msg = JSON.parse(evt.data);
+      const msgType = msg?.meta?.message || '';
+
+      if (msgType === 'stat-update') {
+        // Server-pushed live stats — apply directly, no fetch needed
+        applyStatUpdate(msg.data || []);
+        return;
+      }
+    } catch(_) {}
+    // Any other event = topology change, do a full refresh
     scheduleTopoRefresh();
   };
 
@@ -1222,6 +1233,58 @@ function connectSSE() {
 // ─── STAT POLLING ─────────────────────────────────────────────────────────────
 // Fetches only the heavy stat endpoint every 10 seconds and patches
 // node values in-place — no full re-render, no canvas disruption.
+// ─── LIVE STAT UPDATE (from SSE push) ────────────────────────────────────────
+function applyStatUpdate(statList) {
+  if (!devices.length) return;
+
+  const byMac = {};
+  const byIp  = {};
+  statList.forEach(s => {
+    if (s.mac) byMac[s.mac.toLowerCase().replace(/[^0-9a-f]/g, '')] = s;
+    if (s.ip)  byIp[s.ip] = s;
+  });
+
+  devices.forEach(d => {
+    const normMac = d.mac ? d.mac.replace(/[^0-9a-f]/g, '') : '';
+    const s = (normMac && byMac[normMac]) || byIp[d.ip];
+    if (!s) return;
+
+    const cpu      = parseFloat(s.cpu ?? d.cpu);
+    const mem      = parseFloat(s.mem ?? d.mem);
+    const clients  = s.clients  ?? d.clients;
+    const portsUsed = s.portsUsed ?? d.portsUsed;
+    const tx = s.tx != null ? `${s.tx} KB/s` : d.tx;
+    const rx = s.rx != null ? `${s.rx} KB/s` : d.rx;
+
+    if (cpu === d.cpu && mem === d.mem && clients === d.clients) return;
+
+    d.cpu = cpu; d.mem = mem; d.clients = clients;
+    d.portsUsed = portsUsed; d.tx = tx; d.rx = rx;
+
+    const el = document.querySelector(`.node[data-id="${d.id}"]`);
+    if (el) {
+      const cpuColor = cpu > 80 ? 'warn' : 'good';
+      const memColor = mem > 85 ? 'warn' : 'good';
+      el.querySelectorAll('.ns').forEach(ns => {
+        const label = ns.querySelector('.ns-label')?.textContent?.trim().toUpperCase();
+        const val   = ns.querySelector('.ns-val');
+        if (!val) return;
+        if (label === 'CPU')     { val.textContent = cpu.toFixed(1) + '%'; val.className = `ns-val ${cpuColor}`; }
+        if (label === 'MEM')     { val.textContent = mem.toFixed(1) + '%'; val.className = `ns-val ${memColor}`; }
+        if (label === 'CLIENTS')   val.textContent = clients;
+      });
+    }
+
+    const row = document.querySelector(`.device-row[data-id="${d.id}"]`);
+    if (row) {
+      row.querySelectorAll('.stat').forEach(st => {
+        if (st.textContent.startsWith('CPU')) st.innerHTML = `CPU <span>${cpu.toFixed(1)}%</span>`;
+        if (st.textContent.startsWith('MEM')) st.innerHTML = `MEM <span>${mem.toFixed(1)}%</span>`;
+      });
+    }
+  });
+}
+
 // siteId is cached after first fetch — no need to re-fetch sites every 10s
 let _cachedSiteId = null;
 
@@ -1231,11 +1294,18 @@ async function pollStats() {
   if (_pollInFlight) { console.warn('[pollStats] blocked by in-flight guard'); return; }
   _pollInFlight = true;
   console.log('[pollStats] starting');
+  const abort = new AbortController();
+  const abortTimer = setTimeout(() => {
+    console.warn('[pollStats] fetch timed out after 8s — aborting');
+    abort.abort();
+  }, 8000);
   try {
     // Fetch only the stats endpoint — site ID is stable and cached
     const statsRes = await fetch(`${BASE}/unifi/proxy/network/api/s/default/stat/device`, {
-      headers: { Accept: 'application/json' }
+      headers: { Accept: 'application/json' },
+      signal: abort.signal
     });
+    clearTimeout(abortTimer);
     if (!statsRes.ok) return;
     const statsList = (await statsRes.json()).data || [];
 
@@ -1303,14 +1373,19 @@ async function pollStats() {
       }
     });
   } catch (e) {
-    console.error('[pollStats] ERROR:', e, e.stack);
+    clearTimeout(abortTimer);
+    if (e.name === 'AbortError') {
+      console.warn('[pollStats] request aborted (timeout)');
+    } else {
+      console.error('[pollStats] ERROR:', e, e.stack);
+    }
   } finally {
     _pollInFlight = false;
     console.log('[pollStats] complete');
   }
 }
 
-setInterval(pollStats, 10000);
+setInterval(pollStats, 60000);  // safety-net only — live stats come via SSE
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 if (window.innerWidth > 600) drawMinimap();

@@ -265,32 +265,55 @@ def _unifi_ws_thread():
                     # Everything else (high-freq sync frames, counters, VPN
                     # heartbeats) is dropped here — the 10s stat poll covers
                     # those instead.
-                    FORWARD_TYPES = {
-                        "device:state-changed",   # device went up/down
+                    FORWARD_FULL = {
+                        "device:state-changed",
                         "device:adopt",
                         "device:delete",
-                        "client:add",             # new client connected
+                        "client:add",
                         "client:remove",
                         "alert",
-                        "events",                 # system events
+                        "events",
                         "provision",
                         "upgrade",
                     }
 
-                    if msg_type not in FORWARD_TYPES:
-                        # Log unknown types once so we can tune the list
+                    if msg_type in FORWARD_FULL:
+                        print(f"[WS] forwarding type={msg_type!r} size={len(text)}B", flush=True)
+
+                    elif msg_type == "unifi-device:sync":
+                        # Strip to only the fields the browser needs for live
+                        # stat updates — avoids pushing 4-8KB per frame.
+                        stripped = []
+                        for dev in (msg.get("data") or []):
+                            sys_s = dev.get("system-stats") or {}
+                            entry = {
+                                "mac":     dev.get("mac", ""),
+                                "ip":      dev.get("ip", ""),
+                                "cpu":     sys_s.get("cpu", 0),
+                                "mem":     sys_s.get("mem", 0),
+                                "clients": dev.get("num_sta", 0),
+                            }
+                            port_table = dev.get("port_table") or []
+                            entry["portsUsed"] = sum(1 for p in port_table if p.get("up"))
+                            uplink = dev.get("uplink") or {}
+                            entry["tx"] = round((uplink.get("tx_bytes-r") or 0) / 1024, 1)
+                            entry["rx"] = round((uplink.get("rx_bytes-r") or 0) / 1024, 1)
+                            stripped.append(entry)
+                        if stripped:
+                            import json as _json
+                            out = _json.dumps({"meta": {"message": "stat-update"}, "data": stripped})
+                            _sse_broadcast(out)
+                        continue
+
+                    else:
                         if msg_type not in _seen_ws_types:
                             _seen_ws_types.add(msg_type)
                             print(f"[WS] dropping type={msg_type!r} size={len(text)}B", flush=True)
                         continue
 
-                    print(f"[WS] forwarding type={msg_type!r} size={len(text)}B", flush=True)
-
                 except Exception:
-                    # Non-JSON or unreadable frame — skip silently
                     continue
 
-                # Only meaningful topology events reach the SSE clients
                 _sse_broadcast(text)
 
         except Exception as exc:

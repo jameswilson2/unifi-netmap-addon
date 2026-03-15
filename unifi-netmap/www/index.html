@@ -564,12 +564,14 @@ function portSpeedColor(speedMbps) {
   if (speedMbps >= 2500)   return '#38bdf8'; // 2.5Gb — sky blue
   if (speedMbps >= 1000)   return '#00d4aa'; // 1Gb   — teal
   if (speedMbps >= 100)    return '#f59e0b'; // 100Mb — amber
-  return '#ef4444';                           // 10Mb  — red
+  if (speedMbps >= 10)     return '#ef4444'; // 10Mb  — red
+  return null;                               // 0 or unknown — no colour
 }
 
 function buildPortDot(port, cssClass, index) {
   const speed = port?.speed || 0;
-  const color = port?.up ? portSpeedColor(speed) : null;
+  // Only apply speed colour when port is genuinely up (speed=10 can appear on down ports)
+  const color = (port?.up === true && speed > 0) ? portSpeedColor(speed) : null;
   const poe   = (port?.poe_mode && port.poe_mode !== 'off' && port?.poe_good) ? '+' : '';
   const style = color ? ` style="background:${color}"` : '';
   const portNum = port?.port_idx ?? (index + 1);
@@ -595,7 +597,8 @@ function renderSidebar() {
     row.dataset.id = d.id;
     const ports = Array.from({length: Math.min(d.ports, 16)}, (_, i) => {
       const p = d.portTable?.[i];
-      const cls = i === 0 ? 'port uplink' : (p?.up ? 'port active' : 'port');
+      const isUpl = p?.is_uplink === true;
+      const cls = isUpl ? 'port uplink' : (p?.up ? 'port active' : 'port');
       return buildPortDot(p, cls, i);
     }).join('');
     row.innerHTML = `
@@ -646,7 +649,8 @@ function renderNodes() {
 
     const portHTML = Array.from({length: Math.min(d.ports, 16)}, (_, i) => {
       const p = d.portTable?.[i];
-      const cls = i === 0 ? 'np uplink' : (p?.up ? 'np used' : 'np');
+      const isUpl = p?.is_uplink === true;
+      const cls = isUpl ? 'np uplink' : (p?.up ? 'np used' : 'np');
       return buildPortDot(p, cls, i);
     }).join('');
 
@@ -1070,8 +1074,13 @@ function parseUniFiDevices(listData, statsData) {
 
     const portTable  = s.port_table || [];
     const isAP = (d.features?.includes('accessPoint') && !d.features?.includes('switching')) || d.model === 'Express';
-    const physicalPorts = isAP ? portTable.filter(p => p.media === 'GE' || (p.port_idx != null && p.port_idx <= 1)) : portTable;
-    const portsUsed  = physicalPorts.filter(p => p.up).length;
+    // APs: only physical Ethernet ports (filter out virtual radio interfaces)
+    // For APs, keep ports with media GE, or the uplink port, or port_idx 1
+    const physicalPorts = isAP
+      ? portTable.filter(p => p.media === 'GE' || p.is_uplink === true || p.port_idx === 1)
+      : portTable;
+    // Count ports that are genuinely up (up===true, not just speed>0)
+    const portsUsed = physicalPorts.filter(p => p.up === true).length;
 
     const sysStats = s['system-stats'] || {};
     const sysStatsRaw = s['sys_stats'] || {};

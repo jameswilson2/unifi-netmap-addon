@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.6 - Port rendering fixes
+
+### Bug Fixes
+- **Wrong port highlighted as uplink** — the renderer was hardcoding the first port (`i === 0`) as the uplink port regardless of the actual topology. The UDR7's uplink is the SFP+ port (port 5), not port 1. Now uses `is_uplink: true` from the port table data, so the correct port gets the blue uplink indicator on every device
+- **Disconnected ports showing speed colours** — UniFi reports `speed: 10` on ports that are physically down, causing them to be coloured red despite having nothing connected. Speed colour is now only applied when `up === true && speed > 0`
+- **Ports used count showing 0 in detail panel** — the `up` field comparison used a truthy check where UniFi returns a strict boolean. Changed to `p.up === true` so the count is correct. The UDR7 now correctly shows 4/5 ports used
+- **AP port filter over-excluding ports** — the physical port filter for APs (`media === 'GE'`) was too strict and could miss the uplink port on some AP models. Now also retains ports where `is_uplink === true` or `port_idx === 1` as fallbacks
+
+### Notes on remaining known limitations
+- **UDR7 TX/RX shows `—`** — the UniFi OS WebSocket layer (`/api/ws/system`) does not publish throughput data. The full set of `/api/ws/` endpoints was enumerated via SSH: only `system`, `heartbeat`, `setup`, `speedtest`, and two WebRTC paths exist. TX/RX for the gateway is only available via a REST poll of the Network application stat endpoint, which is a planned future improvement
+- **UDR7 client count shows 0** — same root cause; `num_sta` is not included in the `/api/ws/system` frames. The REST stat endpoint correctly returns 60 clients for the UDR7 and this is shown correctly on page load — it just doesn't update live between topology refreshes
+
+---
+
 ## 1.3.5 - Port colours, uptime fixes & auto theme
 
 ### New Features

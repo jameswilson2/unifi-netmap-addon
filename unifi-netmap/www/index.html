@@ -478,10 +478,14 @@
 // all fetch calls are correctly prefixed — no server round-trip needed.
 let BASE = '';
 async function resolveBase() {
-  const path = window.location.pathname;
-  // Strip trailing slash and any filename, keep the directory prefix
-  // e.g. /api/hassio_ingress/abc123/  →  /api/hassio_ingress/abc123
-  BASE = path.replace(/\/[^/]*$/, '').replace(/\/$/, '');
+  // The page is served at e.g.:
+  //   /api/hassio_ingress/<token>/v1-1-4/
+  // We need BASE = /api/hassio_ingress/<token>
+  // i.e. strip the version segment AND any trailing filename.
+  const path = window.location.pathname
+    .replace(/\/$/, '')          // strip trailing slash
+    .replace(/\/v\d[^/]*$/, ''); // strip /v1-1-4 version segment
+  BASE = path;
   console.log('Ingress BASE:', BASE);
 }
 
@@ -1151,16 +1155,15 @@ canvasWrapEl.addEventListener('touchend', () => {
 }, { passive: true });
 
 // ─── REALTIME — Server-Sent Events ───────────────────────────────────────────
-// SSE works reliably through HA Ingress (plain HTTP keep-alive).
-// The server maintains one WebSocket to UniFi and fans events out here.
 let sse = null;
 let sseRetryTimer = null;
-let refreshDebounce = null;
+let topoDebounce = null;
 
-function scheduleRefresh() {
-  // Debounce: merge bursts of events into a single API poll
-  clearTimeout(refreshDebounce);
-  refreshDebounce = setTimeout(() => fetchFromAPI(), 400);
+// Topology refresh: triggered by SSE events (device up/down, client join etc.)
+// Debounced so a burst of events causes only one re-fetch.
+function scheduleTopoRefresh() {
+  clearTimeout(topoDebounce);
+  topoDebounce = setTimeout(() => fetchFromAPI(), 600);
 }
 
 function connectSSE() {
@@ -1169,39 +1172,102 @@ function connectSSE() {
 
   const sseUrl = `${BASE}/unifi-sse`;
   console.log('SSE connecting:', sseUrl);
-
   sse = new EventSource(sseUrl);
 
-  sse.onopen = () => {
-    console.log('SSE stream open');
-  };
+  sse.onopen = () => console.log('SSE open');
 
   sse.onmessage = (evt) => {
-    // Skip keepalive comments (they don't trigger onmessage, but guard anyway)
-    if (!evt.data || evt.data.startsWith(':')) return;
-    console.log('SSE event:', evt.data.slice(0, 200));
-    try {
-      const msg = JSON.parse(evt.data);
-      // Trigger on any device/client/network payload
-      if (msg?.meta?.message || msg?.meta?.type || msg?.data) {
-        scheduleRefresh();
-      }
-    } catch (_) {
-      // Non-JSON frame — still worth a refresh
-      scheduleRefresh();
-    }
+    if (!evt.data) return;
+    console.log('SSE event:', evt.data.slice(0, 120));
+    // Server already filtered out high-frequency stat frames.
+    // Anything that arrives here is a meaningful topology/state change.
+    scheduleTopoRefresh();
   };
 
   sse.onerror = () => {
-    console.warn('SSE error / closed — reconnecting in 5s');
+    console.warn('SSE error — reconnecting in 5s');
     sse.close();
     sse = null;
     sseRetryTimer = setTimeout(connectSSE, 5000);
   };
 }
 
-// 60s safety-net poll — catches anything the SSE stream misses
-setInterval(() => fetchFromAPI(), 60000);
+// ─── STAT POLLING ─────────────────────────────────────────────────────────────
+// Fetches only the heavy stat endpoint every 10 seconds and patches
+// node values in-place — no full re-render, no canvas disruption.
+async function pollStats() {
+  try {
+    const sitesRes = await fetch(`${BASE}/unifi/proxy/network/integration/v1/sites`, {
+      headers: { Accept: 'application/json' }
+    });
+    if (!sitesRes.ok) return;
+    const sitesData = await sitesRes.json();
+    const siteId = sitesData.data?.[0]?.id;
+    if (!siteId) return;
+
+    const statsRes = await fetch(`${BASE}/unifi/proxy/network/api/s/default/stat/device`, {
+      headers: { Accept: 'application/json' }
+    });
+    if (!statsRes.ok) return;
+    const statsData = await statsRes.json();
+    const statsList = statsData.data || [];
+
+    const statsByMac = {};
+    statsList.forEach(s => { if (s.mac) statsByMac[s.mac.toLowerCase()] = s; });
+
+    // Patch each device's live values in-place without touching the canvas
+    devices.forEach(d => {
+      const s = statsByMac[d.model?.toLowerCase()] ||
+                statsList.find(x => x.ip === d.ip) || {};
+
+      const sysStats = s['system-stats'] || {};
+      const cpu = parseFloat(sysStats.cpu ?? d.cpu);
+      const mem = parseFloat(sysStats.mem ?? d.mem);
+      const clients = s.num_sta ?? d.clients;
+      const portsUsed = (s.port_table || []).filter(p => p.up).length || d.portsUsed;
+      const tx = s.uplink ? `${((s.uplink['tx_bytes-r'] || 0) / 1024).toFixed(1)} KB/s` : d.tx;
+      const rx = s.uplink ? `${((s.uplink['rx_bytes-r'] || 0) / 1024).toFixed(1)} KB/s` : d.rx;
+
+      // Only update DOM if values actually changed
+      if (cpu === d.cpu && mem === d.mem && clients === d.clients) return;
+
+      d.cpu = cpu; d.mem = mem; d.clients = clients;
+      d.portsUsed = portsUsed; d.tx = tx; d.rx = rx;
+
+      const el = document.querySelector(`.node[data-id="${d.id}"]`);
+      if (!el) return;
+
+      const cpuColor = cpu > 80 ? 'warn' : 'good';
+      const memColor = mem > 85 ? 'warn' : 'good';
+      const cpuEl = el.querySelector('.ns-val.good, .ns-val.warn');
+      if (cpuEl) { cpuEl.textContent = cpu.toFixed(1) + '%'; cpuEl.className = `ns-val ${cpuColor}`; }
+
+      // Update all ns-val spans by their label
+      el.querySelectorAll('.ns').forEach(ns => {
+        const label = ns.querySelector('.ns-label')?.textContent?.trim().toUpperCase();
+        const val   = ns.querySelector('.ns-val');
+        if (!val) return;
+        if (label === 'CPU') { val.textContent = cpu.toFixed(1) + '%'; val.className = `ns-val ${cpuColor}`; }
+        if (label === 'MEM') { val.textContent = mem.toFixed(1) + '%'; val.className = `ns-val ${memColor}`; }
+        if (label === 'CLIENTS') val.textContent = clients;
+        if (label === 'IP ADDRESS') val.textContent = d.ip;
+      });
+
+      // Update sidebar row stats too
+      const row = document.querySelector(`.device-row[data-id="${d.id}"]`);
+      if (row) {
+        row.querySelectorAll('.stat').forEach(s => {
+          if (s.textContent.startsWith('CPU')) s.innerHTML = `CPU <span>${cpu.toFixed(1)}%</span>`;
+          if (s.textContent.startsWith('MEM')) s.innerHTML = `MEM <span>${mem.toFixed(1)}%</span>`;
+        });
+      }
+    });
+  } catch (e) {
+    console.warn('Stat poll error:', e);
+  }
+}
+
+setInterval(pollStats, 10000);
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 if (window.innerWidth > 600) drawMinimap();

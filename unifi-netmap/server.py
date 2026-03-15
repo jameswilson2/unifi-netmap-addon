@@ -36,6 +36,10 @@ PORT          = 8765
 WWW_DIR       = "/www"
 INGRESS_ENTRY = os.environ.get("INGRESS_ENTRY", "")
 
+# Bump this whenever index.html changes — clients are redirected to /v<VER>/
+# which is never in their cache, guaranteeing a fresh load after every update.
+APP_VERSION   = "v1-1-4"
+
 # Derive plain hostname:port for the WS connection
 _host_part    = UNIFI_HOST.replace("https://", "").replace("http://", "")
 UNIFI_WS_HOST = _host_part if ":" in _host_part else (
@@ -240,8 +244,49 @@ def _unifi_ws_thread():
                 if payload is None:
                     print("[WS] Connection closed by UniFi", flush=True)
                     break
-                if payload:
-                    _sse_broadcast(payload.decode(errors="replace"))
+                if not payload:
+                    continue
+
+                text = payload.decode(errors="replace")
+
+                # ── Event filtering ───────────────────────────────────────
+                # UniFi streams continuous high-frequency stat frames that
+                # are hundreds of KB each.  We only want topology/state
+                # events that signal something meaningful changed.
+                # Drop anything that isn't worth waking the browser for.
+                try:
+                    msg  = __import__('json').loads(text)
+                    meta = msg.get("meta", {})
+                    msg_type = (
+                        meta.get("message") or
+                        meta.get("type")    or
+                        meta.get("rc")      or ""
+                    ).lower()
+
+                    # These are the continuous stat-stream frames — drop them.
+                    # They arrive many times per second and are already covered
+                    # by the REST poll.
+                    SKIP_TYPES = {
+                        "speed-test:update",
+                        "client:sync",          # per-client counters
+                        "device:sync",          # high-freq device counters
+                        "sta:sync",
+                        "stat",
+                        "pong",
+                    }
+                    if msg_type in SKIP_TYPES:
+                        continue
+
+                    # Log the first occurrence of any new type so we can tune
+                    # this list without needing extra debug builds.
+                    print(f"[WS] event type={msg_type!r} size={len(text)}B", flush=True)
+
+                except Exception:
+                    # Non-JSON frame (binary, keep-alive) — skip silently
+                    continue
+
+                # Only topology/state events reach here — broadcast to SSE
+                _sse_broadcast(text)
 
         except Exception as exc:
             print(f"[WS] Error: {exc} — retrying in {backoff}s", flush=True)
@@ -278,46 +323,32 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_sse()
             return
 
-        # Stale browsers (old cached index.html) still request /unifi-ws.
-        # Serve a tiny JS redirect shim so they immediately reload and pick
-        # up the new index.html — breaking the cache deadlock without manual
-        # browser intervention.
-        if self.path.startswith("/unifi-ws"):
-            self._handle_ws_shim()
-            return
-
         if self.path.startswith("/unifi/"):
             self._proxy_unifi()
             return
 
-        if self.path in ("/", ""):
-            self.path = "/index.html"
+        # Everything that could be a stale cached page — including /unifi-ws
+        # from old JS — gets a 302 to the versioned URL.  That URL has never
+        # been cached so the browser always fetches a fresh index.html.
+        versioned_root = f"/{APP_VERSION}/"
+        if self.path in ("/", "", "/index.html") or self.path.startswith("/unifi-ws"):
+            self._redirect(versioned_root)
+            return
 
-        # Serve index.html with no-cache headers so the browser always
-        # fetches a fresh copy after any add-on update.
-        if self.path in ("/index.html",):
+        # Versioned app root — serve with hard no-cache headers
+        if self.path in (versioned_root, versioned_root + "index.html"):
             self._serve_nocache_html()
             return
 
         super().do_GET()
 
-    def _handle_ws_shim(self):
-        """
-        Browsers running the old index.html will attempt a WebSocket upgrade
-        to /unifi-ws.  Intercepting it here and returning a small HTML page
-        that hard-reloads forces them to fetch the new index.html immediately.
-        """
-        body = (
-            b"<!DOCTYPE html><html><head>"
-            b"<meta http-equiv='refresh' content='0;url=/'>"
-            b"</head><body>"
-            b"<script>window.location.replace('/');</script>"
-            b"</body></html>"
-        )
-        self.send_response(200)
-        self.send_header("Content-Type",   "text/html; charset=utf-8")
-        self.send_header("Content-Length", len(body))
+    def _redirect(self, location):
+        body = f"<html><body>Redirecting to <a href=\"{location}\">here</a></body></html>".encode()
+        self.send_response(302)
+        self.send_header("Location",       location)
         self.send_header("Cache-Control",  "no-store")
+        self.send_header("Content-Type",   "text/html")
+        self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
 

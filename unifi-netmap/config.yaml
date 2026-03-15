@@ -1,5 +1,5 @@
 name: "UniFi Network Map"
-version: "1.1.7"
+version: "1.1.8"
 slug: "unifi_netmap"
 description: "Live UniFi network topology map with dark/light theme, hosted on your HA server."
 url: "https://github.com/your-username/unifi-netmap-addon"

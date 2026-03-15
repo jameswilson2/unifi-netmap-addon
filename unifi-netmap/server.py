@@ -338,6 +338,155 @@ _seen_ws_types: set = set()   # tracks unknown types so we log each only once
 threading.Thread(target=_unifi_ws_thread, daemon=True).start()
 
 
+# ── Background UniFi OS /api/ws/system thread ─────────────────────────────────
+# This endpoint streams gateway/router stats (CPU, memory, uptime, temperature)
+# which are NOT available on the Network application WS (/proxy/network/wss/...).
+# The gateway MAC is discovered dynamically from the first frame — no hardcoding.
+_SYS_WS_PATH = "/api/ws/system"
+
+def _unifi_sys_ws_thread():
+    """
+    Connect to the UniFi OS system WebSocket and broadcast gateway stats
+    as stat-update SSE events, using the same format as unifi-device:sync
+    so applyStatUpdate() in the browser handles them with no extra logic.
+    The gateway MAC is read from the first frame and cached for the session.
+    """
+    import time
+
+    backoff    = 5
+    cookie_str = ""
+
+    while True:
+        sock = None
+        try:
+            if not cookie_str:
+                cookie_str = _login()
+
+            host, port_str = UNIFI_WS_HOST.rsplit(":", 1)
+            port   = int(port_str)
+            origin = UNIFI_HOST.rstrip("/")
+            ws_key = _random_ws_key()
+
+            raw  = socket.create_connection((host, port), timeout=15)
+            sock = ctx.wrap_socket(raw, server_hostname=host) if UNIFI_WS_USE_SSL else raw
+
+            upgrade = (
+                f"GET {_SYS_WS_PATH} HTTP/1.1\r\n"
+                f"Host: {UNIFI_WS_HOST}\r\n"
+                f"Origin: {origin}\r\n"
+                f"Cookie: {cookie_str}\r\n"
+                f"Upgrade: websocket\r\n"
+                f"Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Key: {ws_key}\r\n"
+                f"Sec-WebSocket-Version: 13\r\n"
+                f"\r\n"
+            )
+            sock.sendall(upgrade.encode())
+
+            resp = b""
+            while b"\r\n\r\n" not in resp:
+                chunk = sock.recv(1)
+                if not chunk:
+                    raise ConnectionError("Connection closed before headers")
+                resp += chunk
+
+            resp_str = resp.decode(errors="replace")
+            if "401" in resp_str or "403" in resp_str:
+                print("[SYS-WS] Session rejected — re-logging in", flush=True)
+                cookie_str = ""
+                raise ConnectionError("Session expired")
+
+            if "101" not in resp_str:
+                try: extra = sock.recv(512)
+                except Exception: extra = b""
+                print(f"[SYS-WS] Handshake rejected:\n{resp_str}{extra.decode(errors='replace')}", flush=True)
+                raise ConnectionError("Handshake rejected")
+
+            print(f"[SYS-WS] Connected → {UNIFI_WS_HOST}{_SYS_WS_PATH}", flush=True)
+            backoff = 5
+
+            sock.settimeout(90)
+            gateway_mac = None   # discovered from first valid frame
+
+            while True:
+                payload = _recv_ws_frame(sock)
+                if payload is None:
+                    print("[SYS-WS] Connection closed", flush=True)
+                    break
+                if not payload:
+                    continue
+
+                try:
+                    msg = __import__("json").loads(payload.decode(errors="replace"))
+                except Exception:
+                    continue
+
+                if msg.get("type") != "DEVICE_STATE_CHANGED":
+                    continue
+
+                info = msg.get("system", {}).get("info")
+                if not info:
+                    continue
+
+                # Discover gateway MAC dynamically from first frame
+                raw_mac = info.get("mac", "")
+                if not raw_mac:
+                    continue
+
+                # Normalise to colon-separated lowercase (matches integration API format)
+                stripped = raw_mac.replace(":", "").lower()
+                if len(stripped) == 12:
+                    norm_mac = ":".join(stripped[i:i+2] for i in range(0, 12, 2))
+                else:
+                    norm_mac = raw_mac.lower()
+
+                if gateway_mac is None:
+                    gateway_mac = norm_mac
+                    print(f"[SYS-WS] Gateway MAC discovered: {gateway_mac}", flush=True)
+
+                # Extract stats
+                cpu_info = info.get("cpu") or {}
+                memory   = info.get("memory") or {}
+                uptime   = info.get("uptime") or 0
+
+                cpu_load = float(cpu_info.get("currentload", 0))
+                cpu_temp = float(cpu_info.get("temperature", 0))
+                mem_total = memory.get("total", 1)
+                mem_avail = memory.get("available", mem_total)
+                mem_pct   = round((mem_total - mem_avail) / mem_total * 100, 1) if mem_total else 0
+
+                import json as _json
+                stat = _json.dumps({
+                    "meta": {"message": "stat-update"},
+                    "data": [{
+                        "mac":         gateway_mac,
+                        "ip":          info.get("ip", ""),
+                        "cpu":         round(cpu_load, 1),
+                        "mem":         mem_pct,
+                        "temperature": cpu_temp,
+                        "uptime":      int(uptime),
+                        "clients":     0,    # gateway doesn't report connected clients here
+                        "portsUsed":   0,
+                        "tx":          0,
+                        "rx":          0,
+                    }]
+                })
+                _sse_broadcast(stat)
+
+        except Exception as exc:
+            print(f"[SYS-WS] Error: {exc} — retrying in {backoff}s", flush=True)
+        finally:
+            if sock:
+                try: sock.close()
+                except Exception: pass
+
+        time.sleep(backoff)
+        backoff = min(backoff * 2, 60)
+
+
+threading.Thread(target=_unifi_sys_ws_thread, daemon=True).start()
+
+
 # ── HTTP handler ───────────────────────────────────────────────────────────────
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -486,5 +635,7 @@ class ReusableHTTPServer(HTTPServer):
     allow_reuse_address = True
 
 
-print(f"Starting on :{PORT}  UniFi→{UNIFI_HOST}  WS→{UNIFI_WS_HOST}{_WS_PATH}")
+print(f"Starting on :{PORT}  UniFi→{UNIFI_HOST}")
+print(f"Network WS  → {UNIFI_WS_HOST}{_WS_PATH}")
+print(f"System WS   → {UNIFI_WS_HOST}{_SYS_WS_PATH}")
 ReusableHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

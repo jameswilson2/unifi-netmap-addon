@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.4 - Gateway live stats
+
+### New Features
+- **Live stats for the gateway/router (UDR7 and equivalents)** — the gateway device now updates in real-time alongside all other devices. Previously it showed only the values from the initial page load and never refreshed, because the Network application WebSocket (`/proxy/network/wss/s/default/events`) does not emit stat frames for the device hosting the controller itself
+- **CPU temperature for the gateway** — `cpu.temperature` is now captured from the UniFi OS system WebSocket and included in the stat-update payload, available for future display in the detail panel
+- **Second background WebSocket thread** — `server.py` now connects to `/api/ws/system` (the UniFi OS-level endpoint, one layer above the Network application) in addition to the existing Network events stream. This endpoint streams `DEVICE_STATE_CHANGED` frames containing CPU load, memory, uptime and temperature for the gateway
+
+### Improvements
+- **Fully dynamic gateway discovery** — the gateway MAC address is read from the first `DEVICE_STATE_CHANGED` frame at runtime and normalised to standard colon-separated lowercase format. Nothing is hardcoded; the add-on works with any UniFi OS gateway without modification
+- **Unified stat-update format** — gateway stats are broadcast to SSE clients in exactly the same `stat-update` format as regular device stats, so no frontend changes were required. The existing `applyStatUpdate()` matching logic handles the gateway automatically
+- **Memory percentage derived correctly** — the system WS reports raw bytes (`total`, `free`, `available`); the server converts this to a percentage using `(total - available) / total * 100` to match the format used by other devices
+
+### Technical notes
+- `/api/ws/system` uses the same cookie-based session auth as `/proxy/network/wss/s/default/events` — no additional credentials required
+- The system WS thread has the same exponential back-off reconnect and automatic session re-login behaviour as the Network events thread
+- Startup log now shows both WS endpoints: `Network WS → ...` and `System WS → ...`
+
+---
+
 ## 1.3.3 - Live stat updates & debug mode
 
 ### New Features

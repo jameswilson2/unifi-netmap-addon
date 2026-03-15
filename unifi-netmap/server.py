@@ -35,6 +35,10 @@ UNIFI_PASS    = os.environ.get("UNIFI_PASS", "")
 PORT          = 8765
 WWW_DIR       = "/www"
 INGRESS_ENTRY = os.environ.get("INGRESS_ENTRY", "")
+DEBUG         = os.environ.get("DEBUG", "false").lower() == "true"
+
+def dbg(*args):
+    if DEBUG: print("[DBG]", *args, flush=True)
 
 
 # Derive plain hostname:port for the WS connection
@@ -67,6 +71,7 @@ def _sse_unsubscribe(q):
             pass
 
 def _sse_broadcast(data: str):
+    dbg(f"SSE broadcast {len(data)}B to {len(_sse_clients)} client(s): {data[:80]}")
     with _sse_lock:
         for q in _sse_clients:
             try:
@@ -232,6 +237,7 @@ def _unifi_ws_thread():
                 raise ConnectionError("Handshake rejected")
 
             print(f"[WS] Connected → {UNIFI_WS_HOST}{_WS_PATH}", flush=True)
+            dbg(f"WS handshake response: {resp_str[:200]}")
             backoff = 5   # reset on successful connect
 
             sock.settimeout(90)
@@ -302,6 +308,7 @@ def _unifi_ws_thread():
                         if stripped:
                             import json as _json
                             out = _json.dumps({"meta": {"message": "stat-update"}, "data": stripped})
+                            dbg(f"stat-update: {len(stripped)} device(s), {len(out)}B")
                             _sse_broadcast(out)
                         continue
 
@@ -348,6 +355,10 @@ class Handler(SimpleHTTPRequestHandler):
             path = path[len(ingress):] or "/"
         self.path = path
 
+        if self.path == "/debug-config":
+            self._serve_debug_config()
+            return
+
         if self.path.startswith("/unifi-sse"):
             self._handle_sse()
             return
@@ -363,6 +374,18 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         super().do_GET()
+
+    def _serve_debug_config(self):
+        """Return server-side config flags as JSON for the frontend."""
+        import json as _json
+        body = _json.dumps({"debug": DEBUG}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", len(body))
+        self.send_header("Cache-Control", "no-store")
+        self._cors()
+        self.end_headers()
+        self.wfile.write(body)
 
     def _serve_nocache_html(self):
         """Serve index.html with no-cache headers and an ETag so the browser

@@ -430,6 +430,7 @@
   <div class="topbar-sep"></div>
   <div class="topbar-title">Network Topology by James Wilson</div>
   <div class="topbar-right">
+    <div class="theme-toggle" id="debugToggle" onclick="toggleDebug()" title="Toggle debug logging" style="font-size:11px;width:auto;padding:0 8px;font-family:'JetBrains Mono',monospace;">🐛 Debug: OFF</div>
     <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode">☀</div>
     <div class="status-dot" id="statusDot"></div>
     <div class="status-label" id="statusLabel">CONNECTING...</div>
@@ -477,6 +478,12 @@
 // like /api/hassio_ingress/<token>/. We derive BASE from window.location so
 // all fetch calls are correctly prefixed — no server round-trip needed.
 let BASE = '';
+let DEBUG_MODE = false;
+
+function dbg(...args) {
+  if (DEBUG_MODE) console.log('[DBG]', ...args);
+}
+
 async function resolveBase() {
   // HA Ingress serves the page at:
   //   /api/hassio_ingress/<token>/        (with trailing slash)
@@ -502,6 +509,22 @@ async function resolveBase() {
   if (parts[parts.length - 1].includes('.')) parts.pop();
   BASE = parts.join('/');
   console.log('Ingress BASE:', BASE);
+}
+
+async function loadDebugConfig() {
+  try {
+    const r = await fetch(`${BASE}/debug-config`);
+    if (r.ok) {
+      const cfg = await r.json();
+      DEBUG_MODE = cfg.debug === true;
+      if (DEBUG_MODE) {
+        console.log('%c[UniFi NetMap] DEBUG MODE ON', 'color:#00d4aa;font-weight:bold;font-size:14px');
+        // Make the debug toggle reflect server state
+        const btn = document.getElementById('debugToggle');
+        if (btn) { btn.textContent = '🐛 Debug: ON'; btn.style.color = 'var(--accent)'; }
+      }
+    }
+  } catch(e) { /* ignore */ }
 }
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
@@ -1080,6 +1103,37 @@ function parseUniFiDevices(listData, statsData) {
   drawMinimap();
 }
 
+// ─── DEBUG TOGGLE ────────────────────────────────────────────────────────────
+function toggleDebug() {
+  DEBUG_MODE = !DEBUG_MODE;
+  const btn = document.getElementById('debugToggle');
+  btn.textContent = DEBUG_MODE ? '🐛 Debug: ON' : '🐛 Debug: OFF';
+  btn.style.color  = DEBUG_MODE ? 'var(--accent)' : '';
+  console.log(`[DBG] Debug mode ${DEBUG_MODE ? 'ON' : 'OFF'}`);
+  if (DEBUG_MODE) runDebugReport();
+}
+
+function runDebugReport() {
+  console.group('%c[UniFi NetMap] Debug Report', 'color:#00d4aa;font-weight:bold');
+  console.log('BASE:', BASE);
+  console.log('DEBUG_MODE:', DEBUG_MODE);
+  console.log('devices count:', devices.length);
+  console.log('scale:', scale, 'panX:', panX, 'panY:', panY);
+  if (devices.length) {
+    console.log('device[0]:', {
+      id: devices[0].id, name: devices[0].name,
+      mac: devices[0].mac, statMac: devices[0].statMac,
+      ip: devices[0].ip, statIp: devices[0].statIp,
+      cpu: devices[0].cpu, mem: devices[0].mem,
+      x: devices[0].x, y: devices[0].y
+    });
+  }
+  const nodeEls = document.querySelectorAll('.node');
+  console.log('DOM nodes rendered:', nodeEls.length);
+  console.log('SSE state:', sse ? sse.readyState : 'null');
+  console.groupEnd();
+}
+
 // ─── THEME TOGGLE ────────────────────────────────────────────────────────────
 function isEffectivelyLight() {
   const root = document.documentElement;
@@ -1206,17 +1260,18 @@ function connectSSE() {
 
   sse.onmessage = (evt) => {
     if (!evt.data) return;
+    dbg('SSE raw message:', evt.data.slice(0, 150));
     try {
       const msg = JSON.parse(evt.data);
       const msgType = msg?.meta?.message || '';
+      dbg('SSE msgType:', msgType, 'data items:', msg?.data?.length ?? 0);
 
       if (msgType === 'stat-update') {
-        // Server-pushed live stats — apply directly, no fetch needed
         applyStatUpdate(msg.data || []);
         return;
       }
     } catch(_) {}
-    // Any other event = topology change, do a full refresh
+    dbg('SSE: topology event — scheduling full refresh');
     scheduleTopoRefresh();
   };
 
@@ -1233,7 +1288,7 @@ function connectSSE() {
 // node values in-place — no full re-render, no canvas disruption.
 // ─── LIVE STAT UPDATE (from SSE push) ────────────────────────────────────────
 function applyStatUpdate(statList) {
-  if (!devices.length) return;
+  if (!devices.length) { dbg('applyStatUpdate: no devices yet'); return; }
 
   const byMac = {};
   const byIp  = {};
@@ -1242,15 +1297,17 @@ function applyStatUpdate(statList) {
     if (s.ip)  byIp[s.ip] = s;
   });
 
+  dbg('applyStatUpdate: statList MACs:', Object.keys(byMac), 'IPs:', Object.keys(byIp));
+
   devices.forEach(d => {
-    // Match priority: stat MAC (same source as SSE) > stat IP > integration IP
     const normStatMac  = d.statMac ? d.statMac.replace(/[^0-9a-f]/g, '') : '';
     const normIntegMac = d.mac     ? d.mac.replace(/[^0-9a-f]/g, '')     : '';
     const s = (normStatMac  && byMac[normStatMac])
            || (normIntegMac && byMac[normIntegMac])
            || byIp[d.statIp]
            || byIp[d.ip];
-    if (!s) return;
+    if (!s) { dbg(`applyStatUpdate: NO match for ${d.name} (statMac=${d.statMac} ip=${d.statIp})`); return; }
+    dbg(`applyStatUpdate: matched ${d.name} → cpu=${s.cpu} mem=${s.mem} clients=${s.clients}`);
 
     const cpu      = parseFloat(s.cpu ?? d.cpu);
     const mem      = parseFloat(s.mem ?? d.mem);
@@ -1263,6 +1320,7 @@ function applyStatUpdate(statList) {
     d.portsUsed = portsUsed; d.tx = tx; d.rx = rx;
 
     const el = document.querySelector(`.node[data-id="${d.id}"]`);
+    dbg(`applyStatUpdate: DOM node for ${d.name}:`, el ? 'found' : 'NOT FOUND');
     if (el) {
       const cpuColor = cpu > 80 ? 'warn' : 'good';
       const memColor = mem > 85 ? 'warn' : 'good';
@@ -1390,10 +1448,10 @@ async function pollStats() {
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 if (window.innerWidth > 600) drawMinimap();
-resolveBase().then(() => {
-  fetchFromAPI().then(() => {
-    connectSSE();
-  });
+resolveBase().then(async () => {
+  await loadDebugConfig();
+  await fetchFromAPI();
+  connectSSE();
 });
 </script>
 </body>

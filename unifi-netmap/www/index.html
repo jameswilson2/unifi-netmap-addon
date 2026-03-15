@@ -339,6 +339,7 @@
   .np.used::after { content: ''; position: absolute; inset: 1.5px; border-radius: 0.5px; background: var(--accent); opacity: 0.7; }
   .np.uplink { background: #1a304a; }
   .np.uplink::after { content: ''; position: absolute; inset: 1.5px; border-radius: 0.5px; background: var(--accent2); opacity: 0.8; }
+  .np, .port { font-size: 6px; line-height: 1; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.9); font-weight: 900; }
 
   .node-conn-count {
     margin-top: 6px;
@@ -431,7 +432,7 @@
   <div class="topbar-title">Network Topology by James Wilson</div>
   <div class="topbar-right">
     <div class="theme-toggle" id="debugToggle" onclick="toggleDebug()" title="Toggle debug logging" style="font-size:11px;width:auto;padding:0 8px;font-family:'JetBrains Mono',monospace;">🐛 Debug: OFF</div>
-    <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode">☀</div>
+    <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme: dark / light / auto">☀</div>
     <div class="status-dot" id="statusDot"></div>
     <div class="status-label" id="statusLabel">CONNECTING...</div>
   </div>
@@ -556,6 +557,28 @@ const icons = {
   internet: '⊕'
 };
 
+// ─── PORT SPEED COLOUR ───────────────────────────────────────────────────────
+function portSpeedColor(speedMbps) {
+  if (!speedMbps || speedMbps === 0) return null;
+  if (speedMbps >= 10000)  return '#a78bfa'; // 10Gb  — purple
+  if (speedMbps >= 2500)   return '#38bdf8'; // 2.5Gb — sky blue
+  if (speedMbps >= 1000)   return '#00d4aa'; // 1Gb   — teal
+  if (speedMbps >= 100)    return '#f59e0b'; // 100Mb — amber
+  return '#ef4444';                           // 10Mb  — red
+}
+
+function buildPortDot(port, cssClass, index) {
+  const speed = port?.speed || 0;
+  const color = port?.up ? portSpeedColor(speed) : null;
+  const poe   = (port?.poe_mode && port.poe_mode !== 'off' && port?.poe_good) ? '+' : '';
+  const style = color ? ` style="background:${color}"` : '';
+  const portNum = port?.port_idx ?? (index + 1);
+  const title = port
+    ? `Port ${portNum}${port.name ? ' ('+port.name+')' : ''}: ${port.up ? speed+'Mbps' : 'down'}${poe ? ' PoE' : ''}`
+    : `Port ${portNum}`;
+  return `<div class="${cssClass}"${style} title="${title}">${poe}</div>`;
+}
+
 // ─── RENDER ──────────────────────────────────────────────────────────────────
 function render() {
   renderSidebar();
@@ -571,8 +594,9 @@ function renderSidebar() {
     row.className = 'device-row';
     row.dataset.id = d.id;
     const ports = Array.from({length: Math.min(d.ports, 16)}, (_, i) => {
-      const cls = i === 0 ? 'port uplink' : (i < d.portsUsed ? 'port active' : 'port');
-      return `<div class="${cls}"></div>`;
+      const p = d.portTable?.[i];
+      const cls = i === 0 ? 'port uplink' : (p?.up ? 'port active' : 'port');
+      return buildPortDot(p, cls, i);
     }).join('');
     row.innerHTML = `
       <div class="device-name">${d.name}</div>
@@ -621,8 +645,9 @@ function renderNodes() {
     const memColor = d.mem > 85 ? 'warn' : 'good';
 
     const portHTML = Array.from({length: Math.min(d.ports, 16)}, (_, i) => {
-      const cls = i === 0 ? 'np uplink' : (i < d.portsUsed ? 'np used' : 'np');
-      return `<div class="${cls}" title="Port ${i+1}"></div>`;
+      const p = d.portTable?.[i];
+      const cls = i === 0 ? 'np uplink' : (p?.up ? 'np used' : 'np');
+      return buildPortDot(p, cls, i);
     }).join('');
 
     el.innerHTML = `
@@ -1044,16 +1069,21 @@ function parseUniFiDevices(listData, statsData) {
     const uplinkId  = uplinkMac ? macToId[uplinkMac] : null;
 
     const portTable  = s.port_table || [];
-    const portsUsed  = portTable.filter(p => p.up).length;
+    const isAP = (d.features?.includes('accessPoint') && !d.features?.includes('switching')) || d.model === 'Express';
+    const physicalPorts = isAP ? portTable.filter(p => p.media === 'GE' || (p.port_idx != null && p.port_idx <= 1)) : portTable;
+    const portsUsed  = physicalPorts.filter(p => p.up).length;
 
     const sysStats = s['system-stats'] || {};
+    const sysStatsRaw = s['sys_stats'] || {};
     const cpu = parseFloat(sysStats.cpu ?? 0);
     const mem = parseFloat(sysStats.mem ?? 0);
 
-    const uptimeSec = parseInt(sysStats.uptime ?? 0);
+    const uptimeSec = parseInt(sysStats.uptime || sysStatsRaw.uptime || s.uptime || 0);
     const uptimeStr = uptimeSec > 86400
       ? `${Math.floor(uptimeSec / 86400)}d ${Math.floor((uptimeSec % 86400) / 3600)}h`
-      : `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`;
+      : uptimeSec > 0
+        ? `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`
+        : '—';
 
     let type = 'switch';
     if (d.model === 'UDR7')                                                           type = 'router';
@@ -1077,10 +1107,11 @@ function parseUniFiDevices(listData, statsData) {
       mem,
       uptime:      uptimeStr,
       clients:     s.num_sta ?? 0,
-      ports:       portTable.length || 4,
+      ports:       isAP ? Math.max(physicalPorts.length, 1) : (portTable.length || 4),
       portsUsed,
-      tx:          s.uplink ? `${((s.uplink['tx_bytes-r'] || 0) / 1024).toFixed(1)} KB/s` : '—',
-      rx:          s.uplink ? `${((s.uplink['rx_bytes-r'] || 0) / 1024).toFixed(1)} KB/s` : '—',
+      portTable:   isAP ? physicalPorts : portTable,
+      tx:          s.uplink?.['tx_bytes-r'] != null ? `${(s.uplink['tx_bytes-r'] / 1024).toFixed(1)} KB/s` : (s['bytes-r'] != null ? `${(s['bytes-r'] / 1024).toFixed(1)} KB/s` : '—'),
+      rx:          s.uplink?.['rx_bytes-r'] != null ? `${(s.uplink['rx_bytes-r'] / 1024).toFixed(1)} KB/s` : '—',
       stp:         s.stp_priority === 32768,
       x: 0, y: 0  // will be set below
     };
@@ -1135,6 +1166,7 @@ function runDebugReport() {
 }
 
 // ─── THEME TOGGLE ────────────────────────────────────────────────────────────
+// Three modes cycling: 'auto' (OS) → 'dark' → 'light' → 'auto'
 function isEffectivelyLight() {
   const root = document.documentElement;
   if (root.classList.contains('light')) return true;
@@ -1143,39 +1175,37 @@ function isEffectivelyLight() {
 }
 
 function applyThemeButton() {
-  document.getElementById('themeToggle').textContent = isEffectivelyLight() ? '☾' : '☀';
+  const saved = localStorage.getItem('unifi-theme') || 'auto';
+  const btn = document.getElementById('themeToggle');
+  if (saved === 'auto')  btn.textContent = '⊙'; // auto mode
+  else if (saved === 'dark')  btn.textContent = '☀'; // dark, click → light
+  else                        btn.textContent = '☾'; // light, click → auto
+}
+
+function applyThemeClasses(mode) {
+  const root = document.documentElement;
+  root.classList.remove('light', 'dark');
+  if (mode === 'dark')  root.classList.add('dark');
+  if (mode === 'light') root.classList.add('light');
 }
 
 function toggleTheme() {
-  const root = document.documentElement;
-  const osLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-  const currentlyLight = isEffectivelyLight();
-  // Toggle to opposite of current state, but only set a class if it differs from OS
-  root.classList.remove('light', 'dark');
-  if (currentlyLight) {
-    // Switch to dark — if OS is dark we need no class, if OS is light we need .dark
-    if (!osLight) { /* OS is already dark, just remove classes */ }
-    else root.classList.add('dark');
-    localStorage.setItem('unifi-theme', 'dark');
-  } else {
-    // Switch to light — if OS is light we need no class, if OS is dark we need .light
-    if (osLight) { /* OS is already light, just remove classes */ }
-    else root.classList.add('light');
-    localStorage.setItem('unifi-theme', 'light');
-  }
+  const saved = localStorage.getItem('unifi-theme') || 'auto';
+  const next = saved === 'auto' ? 'dark' : saved === 'dark' ? 'light' : 'auto';
+  if (next === 'auto') localStorage.removeItem('unifi-theme');
+  else localStorage.setItem('unifi-theme', next);
+  applyThemeClasses(next);
   applyThemeButton();
   drawMinimap();
 }
 
-// Restore saved theme preference on load, then listen for OS changes
+// Restore saved theme on load, listen for OS theme changes
 (function () {
-  const saved = localStorage.getItem('unifi-theme');
-  const root  = document.documentElement;
-  if (saved === 'light') root.classList.add('light');
-  else if (saved === 'dark') root.classList.add('dark');
+  const saved = localStorage.getItem('unifi-theme') || 'auto';
+  applyThemeClasses(saved);
   applyThemeButton();
-  // Live-update if user changes OS theme and has no manual override
-  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+  // When OS theme changes, update button and minimap (only visibly matters in auto mode)
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
     if (!localStorage.getItem('unifi-theme')) {
       applyThemeButton();
       drawMinimap();

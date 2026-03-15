@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.3.5 - Port colours, uptime fixes & auto theme
+
+### New Features
+- **Port speed colours** — port dots on both the canvas nodes and the sidebar now use colour to indicate negotiated link speed: purple (10Gb), sky blue (2.5Gb), teal (1Gb), amber (100Mb), red (10Mb). Inactive ports remain grey as before
+- **PoE indicator** — ports actively delivering Power over Ethernet show a `+` symbol inside the dot (requires `poe_mode` active and `poe_good` confirmed by the controller)
+- **Auto theme mode** — the dark/light toggle now cycles through three modes: auto (⊙), dark (☀), light (☾). In auto mode the UI follows the OS preference in real time, including responding to live OS theme changes via `prefers-color-scheme`. The previously saved preference is preserved on upgrade
+
+### Bug Fixes
+- **Uptime showing 0d 0h on Flex Mini and similar devices** — some devices report `system-stats.uptime` as 0 while the correct value is in `sys_stats.uptime` or the top-level `uptime` field. The mapping now falls back through all three sources. Devices with genuinely zero uptime now show `—` instead of `0h 0m`
+- **TX/RX showing 0 KB/s** — the rate fields were checked with a falsy test that treated a valid `0` as missing. Now uses an explicit `!= null` check, and falls back to the device-level `bytes-r` field as a secondary source for devices where uplink rate is not separately reported
+- **U6+ and other APs showing 4 ports, 0 used** — access points expose virtual radio interfaces in their `port_table` alongside the single physical Ethernet port, inflating the port count. APs are now detected and their port table is filtered to physical Ethernet ports only (`media === 'GE'` or `port_idx <= 1`), so the U6+ correctly shows 1 port connected
+- **UDR7 port count showing 0** — the full `portTable` array was not being stored on the device object after the initial mapping, so the renderer had nothing to work with. Now stored and passed through to both canvas and sidebar rendering
+
+### Technical notes
+- New `portSpeedColor(speedMbps)` helper maps speed values to CSS colours
+- New `buildPortDot(port, cssClass, index)` helper constructs port dot HTML with speed colour, PoE indicator, and tooltip — used by both sidebar and canvas renderers
+- New `applyThemeClasses(mode)` separates class application from the toggle logic, making auto mode a clean no-class state driven entirely by the CSS media query
+- The OS theme change listener now correctly targets `prefers-color-scheme: dark` (previously `light`) so the `event.matches` value is unambiguous
+
+---
+
 ## 1.3.4 - Gateway live stats
 
 ### New Features

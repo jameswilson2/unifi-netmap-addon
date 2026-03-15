@@ -1147,66 +1147,64 @@ canvasWrapEl.addEventListener('touchend', () => {
   isPanning = false;
 }, { passive: true });
 
-// ─── REALTIME WEBSOCKET ──────────────────────────────────────────────────────
-let ws = null;
-let wsReconnectTimer = null;
-let wsFallbackTimer = null;
+// ─── REALTIME — Server-Sent Events ───────────────────────────────────────────
+// SSE works reliably through HA Ingress (plain HTTP keep-alive).
+// The server maintains one WebSocket to UniFi and fans events out here.
+let sse = null;
+let sseRetryTimer = null;
+let refreshDebounce = null;
 
 function scheduleRefresh() {
-  // Debounce — don't hammer the API if many events arrive at once
-  clearTimeout(wsFallbackTimer);
-  wsFallbackTimer = setTimeout(() => fetchFromAPI(), 300);
+  // Debounce: merge bursts of events into a single API poll
+  clearTimeout(refreshDebounce);
+  refreshDebounce = setTimeout(() => fetchFromAPI(), 400);
 }
 
-function connectWebSocket() {
-  if (ws) ws.close();
+function connectSSE() {
+  if (sse) { sse.close(); sse = null; }
+  clearTimeout(sseRetryTimer);
 
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${window.location.host}${BASE}/unifi-ws`;
-  console.log('WS connecting:', wsUrl);
+  const sseUrl = `${BASE}/unifi-sse`;
+  console.log('SSE connecting:', sseUrl);
 
-  ws = new WebSocket(wsUrl);
+  sse = new EventSource(sseUrl);
 
-  ws.onopen = () => {
-    console.log('WS connected');
-    clearTimeout(wsReconnectTimer);
+  sse.onopen = () => {
+    console.log('SSE stream open');
   };
 
-  ws.onmessage = (evt) => {
-    // Log raw message so we can see what UniFi actually sends
-    console.log('WS message:', evt.data.slice(0, 200));
+  sse.onmessage = (evt) => {
+    // Skip keepalive comments (they don't trigger onmessage, but guard anyway)
+    if (!evt.data || evt.data.startsWith(':')) return;
+    console.log('SSE event:', evt.data.slice(0, 200));
     try {
       const msg = JSON.parse(evt.data);
-      const type = msg?.meta?.message || msg?.meta?.type || '';
-      // Trigger on any device/client/network event — cast wide net
-      if (type || msg?.data) {
+      // Trigger on any device/client/network payload
+      if (msg?.meta?.message || msg?.meta?.type || msg?.data) {
         scheduleRefresh();
       }
     } catch (_) {
-      // Non-JSON frame — still trigger a refresh
+      // Non-JSON frame — still worth a refresh
       scheduleRefresh();
     }
   };
 
-  ws.onclose = () => {
-    console.log('WS closed — reconnecting in 5s');
-    wsReconnectTimer = setTimeout(connectWebSocket, 5000);
-  };
-
-  ws.onerror = (e) => {
-    console.warn('WS error', e);
-    ws.close();
+  sse.onerror = () => {
+    console.warn('SSE error / closed — reconnecting in 5s');
+    sse.close();
+    sse = null;
+    sseRetryTimer = setTimeout(connectSSE, 5000);
   };
 }
 
-// 30s fallback poll — catches anything the WS misses
-setInterval(() => fetchFromAPI(), 30000);
+// 60s safety-net poll — catches anything the SSE stream misses
+setInterval(() => fetchFromAPI(), 60000);
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 if (window.innerWidth > 600) drawMinimap();
 resolveBase().then(() => {
   fetchFromAPI().then(() => {
-    connectWebSocket();
+    connectSSE();
   });
 });
 </script>

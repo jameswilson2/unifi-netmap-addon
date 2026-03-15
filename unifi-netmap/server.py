@@ -36,9 +36,6 @@ PORT          = 8765
 WWW_DIR       = "/www"
 INGRESS_ENTRY = os.environ.get("INGRESS_ENTRY", "")
 
-# Bump this whenever index.html changes — clients are redirected to /v<VER>/
-# which is never in their cache, guaranteeing a fresh load after every update.
-APP_VERSION   = "v1-2-0"
 
 # Derive plain hostname:port for the WS connection
 _host_part    = UNIFI_HOST.replace("https://", "").replace("http://", "")
@@ -327,44 +324,32 @@ class Handler(SimpleHTTPRequestHandler):
             self._proxy_unifi()
             return
 
-        # Everything that could be a stale cached page — including /unifi-ws
-        # from old JS — gets a 302 to the versioned URL.  That URL has never
-        # been cached so the browser always fetches a fresh index.html.
-        versioned_root = f"/{APP_VERSION}/"
-        if self.path in ("/", "", "/index.html") or self.path.startswith("/unifi-ws"):
-            self._redirect(versioned_root)
-            return
-
-        # Versioned app root — serve with hard no-cache headers
-        if self.path in (versioned_root, versioned_root + "index.html"):
+        # Serve index.html (and root) with no-cache headers so the browser
+        # always validates against the server rather than using a stale copy.
+        if self.path in ("/", "", "/index.html"):
             self._serve_nocache_html()
             return
 
         super().do_GET()
 
-    def _redirect(self, location):
-        body = f"<html><body>Redirecting to <a href=\"{location}\">here</a></body></html>".encode()
-        self.send_response(302)
-        self.send_header("Location",       location)
-        self.send_header("Cache-Control",  "no-store")
-        self.send_header("Content-Type",   "text/html")
-        self.send_header("Content-Length", len(body))
-        self.end_headers()
-        self.wfile.write(body)
-
     def _serve_nocache_html(self):
-        """Serve index.html with headers that prevent any caching."""
-        import os as _os
-        filepath = _os.path.join(WWW_DIR, "index.html")
+        """Serve index.html with no-cache headers and an ETag so the browser
+        always revalidates but can still use a 304 when nothing changed."""
+        filepath = os.path.join(WWW_DIR, "index.html")
         try:
+            stat = os.stat(filepath)
+            etag = f'"{int(stat.st_mtime)}-{stat.st_size}"'
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.end_headers()
+                return
             with open(filepath, "rb") as f:
                 body = f.read()
             self.send_response(200)
             self.send_header("Content-Type",   "text/html; charset=utf-8")
             self.send_header("Content-Length", len(body))
-            self.send_header("Cache-Control",  "no-cache, no-store, must-revalidate")
-            self.send_header("Pragma",         "no-cache")
-            self.send_header("Expires",        "0")
+            self.send_header("Cache-Control",  "no-cache")
+            self.send_header("ETag",           etag)
             self.end_headers()
             self.wfile.write(body)
         except FileNotFoundError:

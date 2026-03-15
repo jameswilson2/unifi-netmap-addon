@@ -478,14 +478,9 @@
 // all fetch calls are correctly prefixed — no server round-trip needed.
 let BASE = '';
 async function resolveBase() {
-  // The page is served at e.g.:
-  //   /api/hassio_ingress/<token>/v1-2-0/
-  // We need BASE = /api/hassio_ingress/<token>
-  // i.e. strip the version segment AND any trailing filename.
-  const path = window.location.pathname
-    .replace(/\/$/, '')          // strip trailing slash
-    .replace(/\/v\d[^/]*$/, ''); // strip /v1-1-4 version segment
-  BASE = path;
+  // Page is served at /api/hassio_ingress/<token>/
+  // Strip trailing slash and any filename to get the base prefix.
+  BASE = window.location.pathname.replace(/\/[^/]*$/, '').replace(/\/$/, '');
   console.log('Ingress BASE:', BASE);
 }
 

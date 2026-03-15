@@ -1185,6 +1185,7 @@ let topoDebounce = null;
 // Topology refresh: triggered by SSE events (device up/down, client join etc.)
 // Debounced so a burst of events causes only one re-fetch.
 function scheduleTopoRefresh() {
+  console.log('[SSE] scheduleTopoRefresh triggered');
   clearTimeout(topoDebounce);
   topoDebounce = setTimeout(() => fetchFromAPI(), 600);
 }
@@ -1201,9 +1202,7 @@ function connectSSE() {
 
   sse.onmessage = (evt) => {
     if (!evt.data) return;
-    console.log('SSE event:', evt.data.slice(0, 120));
-    // Server already filtered out high-frequency stat frames.
-    // Anything that arrives here is a meaningful topology/state change.
+    console.log('[SSE] message received:', evt.data.slice(0, 120));
     scheduleTopoRefresh();
   };
 
@@ -1235,12 +1234,28 @@ async function pollStats() {
 
     // Build lookup by MAC address (the stable device identifier)
     const statsByMac = {};
-    statsList.forEach(s => { if (s.mac) statsByMac[s.mac.toLowerCase()] = s; });
+    const statsByIp  = {};
+    statsList.forEach(s => {
+      if (s.mac) statsByMac[s.mac.toLowerCase().replace(/[^0-9a-f]/g, '')] = s;
+      if (s.ip)  statsByIp[s.ip] = s;
+    });
+
+    // Debug: log once so we can verify MAC/IP matching
+    if (!pollStats._debugged && devices.length && statsList.length) {
+      pollStats._debugged = true;
+      const d0 = devices[0];
+      const s0 = statsList[0];
+      console.log('[pollStats debug] device[0]:', {id: d0.id, mac: d0.mac, ip: d0.ip});
+      console.log('[pollStats debug] stat[0]:', {mac: s0.mac, ip: s0.ip, name: s0.name});
+      console.log('[pollStats debug] statsByMac keys:', Object.keys(statsByMac).slice(0,5));
+      console.log('[pollStats debug] statsByIp keys:', Object.keys(statsByIp).slice(0,5));
+    }
 
     devices.forEach(d => {
-      // Match by the device's MAC address stored in d.mac (set during parseUniFiDevices)
-      const s = (d.mac ? statsByMac[d.mac.toLowerCase()] : null)
-             || statsList.find(x => x.ip === d.ip)
+      // Normalise MAC to bare hex for comparison (handles aa:bb:cc vs aabbcc)
+      const normMac = d.mac ? d.mac.replace(/[^0-9a-f]/g, '') : '';
+      const s = (normMac ? statsByMac[normMac] : null)
+             || statsByIp[d.ip]
              || {};
 
       const sysStats  = s['system-stats'] || {};

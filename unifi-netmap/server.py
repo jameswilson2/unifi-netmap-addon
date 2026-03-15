@@ -16,7 +16,6 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 import socket
 import hashlib
 import base64
-import struct
 
 UNIFI_HOST    = os.environ.get("UNIFI_HOST", "https://192.168.4.1")
 API_KEY       = os.environ.get("API_KEY", "")
@@ -45,6 +44,10 @@ def _ws_accept(key: str) -> str:
         hashlib.sha1((key + WS_MAGIC).encode()).digest()
     ).decode()
 
+def _random_ws_key() -> str:
+    """Generate a fresh random Sec-WebSocket-Key (16 random bytes, base64-encoded)."""
+    return base64.b64encode(os.urandom(16)).decode()
+
 def _proxy_ws(client_sock, path, api_key):
     """Tunnel a WebSocket connection between the browser and UniFi controller."""
     host, port_str = UNIFI_WS_HOST.rsplit(":", 1)
@@ -56,13 +59,21 @@ def _proxy_ws(client_sock, path, api_key):
     else:
         server_sock = raw
 
+    # Build origin from UNIFI_HOST so nginx accepts the upgrade.
+    # UniFi's nginx enforces a valid Origin header on WebSocket upgrades.
+    origin = UNIFI_HOST.rstrip("/")  # e.g. https://192.168.4.1
+
+    # Use a fresh random key each time — some implementations reject replayed keys.
+    ws_key = _random_ws_key()
+
     # Send upstream WS upgrade request
     upgrade = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {UNIFI_WS_HOST}\r\n"
+        f"Origin: {origin}\r\n"
         f"Upgrade: websocket\r\n"
         f"Connection: Upgrade\r\n"
-        f"Sec-WebSocket-Key: dGhlc2FtcGxla2V5MTY=\r\n"
+        f"Sec-WebSocket-Key: {ws_key}\r\n"
         f"Sec-WebSocket-Version: 13\r\n"
         f"X-API-KEY: {api_key}\r\n"
         f"\r\n"
@@ -74,7 +85,12 @@ def _proxy_ws(client_sock, path, api_key):
     while b"\r\n\r\n" not in resp:
         resp += server_sock.recv(1)
     if b"101" not in resp:
-        print(f"WS upstream rejected: {resp[:200]}", flush=True)
+        # Log the full rejection (headers + truncated body) for easier diagnosis
+        try:
+            extra = server_sock.recv(512)
+        except Exception:
+            extra = b""
+        print(f"WS upstream rejected:\n{(resp + extra).decode(errors='replace')}", flush=True)
         server_sock.close()
         client_sock.close()
         return
@@ -198,4 +214,3 @@ print(f"Forwarding /unifi/* → {UNIFI_HOST}")
 print(f"WebSocket tunnel → {UNIFI_WS_HOST}")
 print(f"Ingress entry: {INGRESS_ENTRY}")
 ReusableHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
-

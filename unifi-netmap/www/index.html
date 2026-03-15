@@ -1043,6 +1043,8 @@ function parseUniFiDevices(listData, statsData) {
     return {
       id:          d.id,
       mac:         d.macAddress?.toLowerCase() || '',
+      statMac:     (s.mac || '').toLowerCase(),   // stat API mac (used by SSE)
+      statIp:      s.ip || '',                    // stat API IP (used by SSE)
       name:        d.name || d.model,
       type,
       model:       d.model,
@@ -1244,20 +1246,14 @@ function applyStatUpdate(statList) {
     if (s.ip)  byIp[s.ip] = s;
   });
 
-  if (!applyStatUpdate._debugged && devices.length) {
-    applyStatUpdate._debugged = true;
-    const d0 = devices[0];
-    const normMac0 = d0.mac ? d0.mac.replace(/[^0-9a-f]/g, '') : '';
-    console.log('[applyStatUpdate] device[0]:', {mac: d0.mac, normMac: normMac0, ip: d0.ip});
-    console.log('[applyStatUpdate] byMac keys:', Object.keys(byMac).slice(0, 5));
-    console.log('[applyStatUpdate] byIp keys:', Object.keys(byIp).slice(0, 5));
-    console.log('[applyStatUpdate] mac match:', byMac[normMac0] ? 'YES' : 'NO');
-    console.log('[applyStatUpdate] ip match:', byIp[d0.ip] ? 'YES' : 'NO');
-  }
-
   devices.forEach(d => {
-    const normMac = d.mac ? d.mac.replace(/[^0-9a-f]/g, '') : '';
-    const s = (normMac && byMac[normMac]) || byIp[d.ip];
+    // Match priority: stat MAC (same source as SSE) > stat IP > integration IP
+    const normStatMac  = d.statMac ? d.statMac.replace(/[^0-9a-f]/g, '') : '';
+    const normIntegMac = d.mac     ? d.mac.replace(/[^0-9a-f]/g, '')     : '';
+    const s = (normStatMac  && byMac[normStatMac])
+           || (normIntegMac && byMac[normIntegMac])
+           || byIp[d.statIp]
+           || byIp[d.ip];
     if (!s) return;
 
     const cpu      = parseFloat(s.cpu ?? d.cpu);
@@ -1340,9 +1336,11 @@ async function pollStats() {
     }
 
     devices.forEach(d => {
-      // Normalise MAC to bare hex for comparison (handles aa:bb:cc vs aabbcc)
-      const normMac = d.mac ? d.mac.replace(/[^0-9a-f]/g, '') : '';
-      const s = (normMac ? statsByMac[normMac] : null)
+      const normStatMac  = d.statMac ? d.statMac.replace(/[^0-9a-f]/g, '') : '';
+      const normIntegMac = d.mac     ? d.mac.replace(/[^0-9a-f]/g, '')     : '';
+      const s = (normStatMac  && statsByMac[normStatMac])
+             || (normIntegMac && statsByMac[normIntegMac])
+             || statsByIp[d.statIp]
              || statsByIp[d.ip]
              || {};
 

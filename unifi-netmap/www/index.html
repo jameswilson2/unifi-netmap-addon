@@ -478,9 +478,29 @@
 // all fetch calls are correctly prefixed — no server round-trip needed.
 let BASE = '';
 async function resolveBase() {
-  // Page is served at /api/hassio_ingress/<token>/
-  // Strip trailing slash and any filename to get the base prefix.
-  BASE = window.location.pathname.replace(/\/[^/]*$/, '').replace(/\/$/, '');
+  // HA Ingress serves the page at:
+  //   /api/hassio_ingress/<token>/        (with trailing slash)
+  //   /api/hassio_ingress/<token>         (without trailing slash, rare)
+  //   /api/hassio_ingress/<token>/index.html  (direct file request)
+  //
+  // In all cases BASE must be /api/hassio_ingress/<token> with no trailing slash.
+  // Strategy: make a HEAD request to /unifi/proxy/network/integration/v1/sites
+  // using progressively shorter path prefixes until we get a non-404, OR
+  // derive it from the X-Ingress-Path the server echoes back in a ping endpoint.
+  //
+  // Simpler reliable approach: the server always responds to /unifi/* regardless
+  // of the ingress prefix because the Python handler strips it.  So we probe
+  // window.location.pathname from longest to shortest prefix.
+  const pathname = window.location.pathname;
+
+  // Build candidate bases from the pathname, longest first:
+  //   /api/hassio_ingress/TOKEN/index.html -> /api/hassio_ingress/TOKEN
+  //   /api/hassio_ingress/TOKEN/           -> /api/hassio_ingress/TOKEN
+  //   /api/hassio_ingress/TOKEN            -> /api/hassio_ingress/TOKEN
+  const parts = pathname.replace(/\/+$/, '').split('/');
+  // Remove trailing filename if present (contains a dot)
+  if (parts[parts.length - 1].includes('.')) parts.pop();
+  BASE = parts.join('/');
   console.log('Ingress BASE:', BASE);
 }
 

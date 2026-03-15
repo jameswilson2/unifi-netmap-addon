@@ -38,7 +38,7 @@ INGRESS_ENTRY = os.environ.get("INGRESS_ENTRY", "")
 
 # Bump this whenever index.html changes — clients are redirected to /v<VER>/
 # which is never in their cache, guaranteeing a fresh load after every update.
-APP_VERSION   = "v1-1-9"
+APP_VERSION   = "v1-2-0"
 
 # Derive plain hostname:port for the WS connection
 _host_part    = UNIFI_HOST.replace("https://", "").replace("http://", "")

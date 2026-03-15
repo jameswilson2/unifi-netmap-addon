@@ -479,7 +479,7 @@
 let BASE = '';
 async function resolveBase() {
   // The page is served at e.g.:
-  //   /api/hassio_ingress/<token>/v1-1-4/
+  //   /api/hassio_ingress/<token>/v1-2-0/
   // We need BASE = /api/hassio_ingress/<token>
   // i.e. strip the version segment AND any trailing filename.
   const path = window.location.pathname

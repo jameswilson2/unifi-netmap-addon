@@ -278,13 +278,67 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_sse()
             return
 
+        # Stale browsers (old cached index.html) still request /unifi-ws.
+        # Serve a tiny JS redirect shim so they immediately reload and pick
+        # up the new index.html — breaking the cache deadlock without manual
+        # browser intervention.
+        if self.path.startswith("/unifi-ws"):
+            self._handle_ws_shim()
+            return
+
         if self.path.startswith("/unifi/"):
             self._proxy_unifi()
             return
 
         if self.path in ("/", ""):
             self.path = "/index.html"
+
+        # Serve index.html with no-cache headers so the browser always
+        # fetches a fresh copy after any add-on update.
+        if self.path in ("/index.html",):
+            self._serve_nocache_html()
+            return
+
         super().do_GET()
+
+    def _handle_ws_shim(self):
+        """
+        Browsers running the old index.html will attempt a WebSocket upgrade
+        to /unifi-ws.  Intercepting it here and returning a small HTML page
+        that hard-reloads forces them to fetch the new index.html immediately.
+        """
+        body = (
+            b"<!DOCTYPE html><html><head>"
+            b"<meta http-equiv='refresh' content='0;url=/'>"
+            b"</head><body>"
+            b"<script>window.location.replace('/');</script>"
+            b"</body></html>"
+        )
+        self.send_response(200)
+        self.send_header("Content-Type",   "text/html; charset=utf-8")
+        self.send_header("Content-Length", len(body))
+        self.send_header("Cache-Control",  "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_nocache_html(self):
+        """Serve index.html with headers that prevent any caching."""
+        import os as _os
+        filepath = _os.path.join(WWW_DIR, "index.html")
+        try:
+            with open(filepath, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type",   "text/html; charset=utf-8")
+            self.send_header("Content-Length", len(body))
+            self.send_header("Cache-Control",  "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma",         "no-cache")
+            self.send_header("Expires",        "0")
+            self.end_headers()
+            self.wfile.write(body)
+        except FileNotFoundError:
+            self.send_response(404)
+            self.end_headers()
 
     def _handle_sse(self):
         q = _sse_subscribe()

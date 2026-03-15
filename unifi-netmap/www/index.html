@@ -938,8 +938,12 @@ let _siteId = null;
 let _fetchInFlight = false;
 
 async function fetchFromAPI() {
-  if (_fetchInFlight) return;   // don't stack concurrent full refreshes
+  if (_fetchInFlight) {
+    console.warn('[fetchFromAPI] blocked by in-flight guard');
+    return;
+  }
   _fetchInFlight = true;
+  console.log('[fetchFromAPI] starting');
 
   document.getElementById('statusLabel').textContent = 'CONNECTING...';
   document.getElementById('statusDot').style.background = 'var(--warn)';
@@ -983,6 +987,7 @@ async function fetchFromAPI() {
     document.getElementById('statusDot').style.boxShadow = 'none';
   } finally {
     _fetchInFlight = false;
+    console.log('[fetchFromAPI] complete, _fetchInFlight cleared');
   }
 }
 
@@ -1222,8 +1227,10 @@ let _cachedSiteId = null;
 
 let _pollInFlight = false;
 async function pollStats() {
-  if (!devices.length || _pollInFlight) return;
+  if (!devices.length) { console.warn('[pollStats] no devices yet'); return; }
+  if (_pollInFlight) { console.warn('[pollStats] blocked by in-flight guard'); return; }
   _pollInFlight = true;
+  console.log('[pollStats] starting');
   try {
     // Fetch only the stats endpoint — site ID is stable and cached
     const statsRes = await fetch(`${BASE}/unifi/proxy/network/api/s/default/stat/device`, {

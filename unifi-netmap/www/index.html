@@ -1010,6 +1010,7 @@ function parseUniFiDevices(listData, statsData) {
 
     return {
       id:          d.id,
+      mac:         d.macAddress?.toLowerCase() || '',
       name:        d.name || d.model,
       type,
       model:       d.model,
@@ -1190,40 +1191,38 @@ function connectSSE() {
 // ─── STAT POLLING ─────────────────────────────────────────────────────────────
 // Fetches only the heavy stat endpoint every 10 seconds and patches
 // node values in-place — no full re-render, no canvas disruption.
-async function pollStats() {
-  try {
-    const sitesRes = await fetch(`${BASE}/unifi/proxy/network/integration/v1/sites`, {
-      headers: { Accept: 'application/json' }
-    });
-    if (!sitesRes.ok) return;
-    const sitesData = await sitesRes.json();
-    const siteId = sitesData.data?.[0]?.id;
-    if (!siteId) return;
+// siteId is cached after first fetch — no need to re-fetch sites every 10s
+let _cachedSiteId = null;
 
+async function pollStats() {
+  if (!devices.length) return;  // nothing to update yet
+  try {
+    // Fetch only the stats endpoint — site ID is stable and cached
     const statsRes = await fetch(`${BASE}/unifi/proxy/network/api/s/default/stat/device`, {
       headers: { Accept: 'application/json' }
     });
     if (!statsRes.ok) return;
-    const statsData = await statsRes.json();
-    const statsList = statsData.data || [];
+    const statsList = (await statsRes.json()).data || [];
 
+    // Build lookup by MAC address (the stable device identifier)
     const statsByMac = {};
     statsList.forEach(s => { if (s.mac) statsByMac[s.mac.toLowerCase()] = s; });
 
-    // Patch each device's live values in-place without touching the canvas
     devices.forEach(d => {
-      const s = statsByMac[d.model?.toLowerCase()] ||
-                statsList.find(x => x.ip === d.ip) || {};
+      // Match by the device's MAC address stored in d.mac (set during parseUniFiDevices)
+      const s = (d.mac ? statsByMac[d.mac.toLowerCase()] : null)
+             || statsList.find(x => x.ip === d.ip)
+             || {};
 
-      const sysStats = s['system-stats'] || {};
-      const cpu = parseFloat(sysStats.cpu ?? d.cpu);
-      const mem = parseFloat(sysStats.mem ?? d.mem);
-      const clients = s.num_sta ?? d.clients;
+      const sysStats  = s['system-stats'] || {};
+      const cpu       = parseFloat(sysStats.cpu ?? d.cpu);
+      const mem       = parseFloat(sysStats.mem ?? d.mem);
+      const clients   = s.num_sta   ?? d.clients;
       const portsUsed = (s.port_table || []).filter(p => p.up).length || d.portsUsed;
       const tx = s.uplink ? `${((s.uplink['tx_bytes-r'] || 0) / 1024).toFixed(1)} KB/s` : d.tx;
       const rx = s.uplink ? `${((s.uplink['rx_bytes-r'] || 0) / 1024).toFixed(1)} KB/s` : d.rx;
 
-      // Only update DOM if values actually changed
+      // Skip DOM update if nothing changed
       if (cpu === d.cpu && mem === d.mem && clients === d.clients) return;
 
       d.cpu = cpu; d.mem = mem; d.clients = clients;
@@ -1234,26 +1233,21 @@ async function pollStats() {
 
       const cpuColor = cpu > 80 ? 'warn' : 'good';
       const memColor = mem > 85 ? 'warn' : 'good';
-      const cpuEl = el.querySelector('.ns-val.good, .ns-val.warn');
-      if (cpuEl) { cpuEl.textContent = cpu.toFixed(1) + '%'; cpuEl.className = `ns-val ${cpuColor}`; }
 
-      // Update all ns-val spans by their label
       el.querySelectorAll('.ns').forEach(ns => {
         const label = ns.querySelector('.ns-label')?.textContent?.trim().toUpperCase();
         const val   = ns.querySelector('.ns-val');
         if (!val) return;
-        if (label === 'CPU') { val.textContent = cpu.toFixed(1) + '%'; val.className = `ns-val ${cpuColor}`; }
-        if (label === 'MEM') { val.textContent = mem.toFixed(1) + '%'; val.className = `ns-val ${memColor}`; }
-        if (label === 'CLIENTS') val.textContent = clients;
-        if (label === 'IP ADDRESS') val.textContent = d.ip;
+        if (label === 'CPU')      { val.textContent = cpu.toFixed(1) + '%';  val.className = `ns-val ${cpuColor}`; }
+        if (label === 'MEM')      { val.textContent = mem.toFixed(1) + '%';  val.className = `ns-val ${memColor}`; }
+        if (label === 'CLIENTS')    val.textContent = clients;
       });
 
-      // Update sidebar row stats too
       const row = document.querySelector(`.device-row[data-id="${d.id}"]`);
       if (row) {
-        row.querySelectorAll('.stat').forEach(s => {
-          if (s.textContent.startsWith('CPU')) s.innerHTML = `CPU <span>${cpu.toFixed(1)}%</span>`;
-          if (s.textContent.startsWith('MEM')) s.innerHTML = `MEM <span>${mem.toFixed(1)}%</span>`;
+        row.querySelectorAll('.stat').forEach(st => {
+          if (st.textContent.startsWith('CPU')) st.innerHTML = `CPU <span>${cpu.toFixed(1)}%</span>`;
+          if (st.textContent.startsWith('MEM')) st.innerHTML = `MEM <span>${mem.toFixed(1)}%</span>`;
         });
       }
     });

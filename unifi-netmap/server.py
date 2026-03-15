@@ -260,29 +260,37 @@ def _unifi_ws_thread():
                         meta.get("rc")      or ""
                     ).lower()
 
-                    # These are the continuous stat-stream frames — drop them.
-                    # They arrive many times per second and are already covered
-                    # by the REST poll.
-                    SKIP_TYPES = {
-                        "speed-test:update",
-                        "client:sync",          # per-client counters
-                        "device:sync",          # high-freq device counters
-                        "sta:sync",
-                        "stat",
-                        "pong",
+                    # Allowlist: only forward events that represent genuine
+                    # topology or state changes worth re-fetching data for.
+                    # Everything else (high-freq sync frames, counters, VPN
+                    # heartbeats) is dropped here — the 10s stat poll covers
+                    # those instead.
+                    FORWARD_TYPES = {
+                        "device:state-changed",   # device went up/down
+                        "device:adopt",
+                        "device:delete",
+                        "client:add",             # new client connected
+                        "client:remove",
+                        "alert",
+                        "events",                 # system events
+                        "provision",
+                        "upgrade",
                     }
-                    if msg_type in SKIP_TYPES:
+
+                    if msg_type not in FORWARD_TYPES:
+                        # Log unknown types once so we can tune the list
+                        if msg_type not in _seen_ws_types:
+                            _seen_ws_types.add(msg_type)
+                            print(f"[WS] dropping type={msg_type!r} size={len(text)}B", flush=True)
                         continue
 
-                    # Log the first occurrence of any new type so we can tune
-                    # this list without needing extra debug builds.
-                    print(f"[WS] event type={msg_type!r} size={len(text)}B", flush=True)
+                    print(f"[WS] forwarding type={msg_type!r} size={len(text)}B", flush=True)
 
                 except Exception:
-                    # Non-JSON frame (binary, keep-alive) — skip silently
+                    # Non-JSON or unreadable frame — skip silently
                     continue
 
-                # Only topology/state events reach here — broadcast to SSE
+                # Only meaningful topology events reach the SSE clients
                 _sse_broadcast(text)
 
         except Exception as exc:
@@ -296,6 +304,7 @@ def _unifi_ws_thread():
         backoff = min(backoff * 2, 60)
 
 
+_seen_ws_types: set = set()   # tracks unknown types so we log each only once
 threading.Thread(target=_unifi_ws_thread, daemon=True).start()
 
 

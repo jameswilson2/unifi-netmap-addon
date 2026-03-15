@@ -1303,9 +1303,10 @@ async function pollStats() {
       }
     });
   } catch (e) {
-    console.warn('Stat poll error:', e);
+    console.error('[pollStats] ERROR:', e, e.stack);
   } finally {
     _pollInFlight = false;
+    console.log('[pollStats] complete');
   }
 }
 

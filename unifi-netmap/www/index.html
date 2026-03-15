@@ -1324,21 +1324,25 @@ function applyStatUpdate(statList) {
     if (el) {
       const cpuColor = cpu > 80 ? 'warn' : 'good';
       const memColor = mem > 85 ? 'warn' : 'good';
-      el.querySelectorAll('.ns').forEach(ns => {
+      const nsItems = el.querySelectorAll('.ns');
+      dbg(`applyStatUpdate: ${d.name} has ${nsItems.length} .ns elements`);
+      nsItems.forEach(ns => {
         const label = ns.querySelector('.ns-label')?.textContent?.trim().toUpperCase();
         const val   = ns.querySelector('.ns-val');
+        dbg(`  ns label="${label}" val=${val ? val.textContent : 'NULL'}`);
         if (!val) return;
-        if (label === 'CPU')     { val.textContent = cpu.toFixed(1) + '%'; val.className = `ns-val ${cpuColor}`; }
-        if (label === 'MEM')     { val.textContent = mem.toFixed(1) + '%'; val.className = `ns-val ${memColor}`; }
-        if (label === 'CLIENTS')   val.textContent = clients;
+        if (label === 'CPU')     { val.textContent = cpu.toFixed(1) + '%'; val.className = `ns-val ${cpuColor}`; dbg(`  → set CPU to ${cpu.toFixed(1)}%`); }
+        if (label === 'MEM')     { val.textContent = mem.toFixed(1) + '%'; val.className = `ns-val ${memColor}`; dbg(`  → set MEM to ${mem.toFixed(1)}%`); }
+        if (label === 'CLIENTS') { val.textContent = clients; dbg(`  → set CLIENTS to ${clients}`); }
       });
     }
 
     const row = document.querySelector(`.device-row[data-id="${d.id}"]`);
+    dbg(`applyStatUpdate: sidebar row for ${d.name}:`, row ? 'found' : 'NOT FOUND');
     if (row) {
       row.querySelectorAll('.stat').forEach(st => {
-        if (st.textContent.startsWith('CPU')) st.innerHTML = `CPU <span>${cpu.toFixed(1)}%</span>`;
-        if (st.textContent.startsWith('MEM')) st.innerHTML = `MEM <span>${mem.toFixed(1)}%</span>`;
+        if (st.textContent.startsWith('CPU')) { st.innerHTML = `CPU <span>${cpu.toFixed(1)}%</span>`; dbg('  → sidebar CPU updated'); }
+        if (st.textContent.startsWith('MEM')) { st.innerHTML = `MEM <span>${mem.toFixed(1)}%</span>`; dbg('  → sidebar MEM updated'); }
       });
     }
   });

@@ -1244,6 +1244,17 @@ function applyStatUpdate(statList) {
     if (s.ip)  byIp[s.ip] = s;
   });
 
+  if (!applyStatUpdate._debugged && devices.length) {
+    applyStatUpdate._debugged = true;
+    const d0 = devices[0];
+    const normMac0 = d0.mac ? d0.mac.replace(/[^0-9a-f]/g, '') : '';
+    console.log('[applyStatUpdate] device[0]:', {mac: d0.mac, normMac: normMac0, ip: d0.ip});
+    console.log('[applyStatUpdate] byMac keys:', Object.keys(byMac).slice(0, 5));
+    console.log('[applyStatUpdate] byIp keys:', Object.keys(byIp).slice(0, 5));
+    console.log('[applyStatUpdate] mac match:', byMac[normMac0] ? 'YES' : 'NO');
+    console.log('[applyStatUpdate] ip match:', byIp[d0.ip] ? 'YES' : 'NO');
+  }
+
   devices.forEach(d => {
     const normMac = d.mac ? d.mac.replace(/[^0-9a-f]/g, '') : '';
     const s = (normMac && byMac[normMac]) || byIp[d.ip];
